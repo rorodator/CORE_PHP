@@ -16,6 +16,12 @@ class Router
     protected $routes = [];
 
     /**
+     * Array of CORE route patterns mapped to service classes (auto-registered)
+     * @var array
+     */
+    protected $coreRoutes = [];
+
+    /**
      * Initialize router with optional route definitions
      *
      * @param array $routes Route patterns mapped to service classes
@@ -23,6 +29,44 @@ class Router
     public function __construct(array $routes = [])
     {
         $this->routes = $routes;
+        $this->registerCoreRoutes();
+    }
+
+    /**
+     * Auto-register CORE routes based on activated services in configuration
+     * This ensures that CORE services are automatically available to all applications
+     */
+    private function registerCoreRoutes()
+    {
+        try {
+            // Get services configuration
+            $services = core()->getConfigSection('services');
+            
+            // Register language service routes if lang service is activated
+            if (isset($services['lang'])) {
+                $this->coreRoutes = array_merge($this->coreRoutes, [
+                    '#^api/lang/labels$#' => '\Core\Rest\Lang\LangGetService',
+                    '#^api/lang/set$#' => '\Core\Rest\Lang\LangSetService',
+                    '#^api/lang/current$#' => '\Core\Rest\Lang\LangCurrentService',
+                    '#^api/lang/switch$#' => '\Core\Rest\Lang\LangSwitchService'
+                ]);
+            }
+            
+            // Future: Add other CORE services here
+            // if (isset($services['auth'])) {
+            //     $this->coreRoutes = array_merge($this->coreRoutes, [
+            //         '#^api/auth/login$#' => '\Core\Rest\Auth\AuthLoginService',
+            //         '#^api/auth/logout$#' => '\Core\Rest\Auth\AuthLogoutService'
+            //     ]);
+            // }
+            
+            // Merge CORE routes with application routes (CORE routes take precedence)
+            $this->routes = array_merge($this->coreRoutes, $this->routes);
+            
+        } catch (\Exception $e) {
+            // If core() is not available or configuration is missing, continue with app routes only
+            // This ensures backward compatibility
+        }
     }
 
     /**

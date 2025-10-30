@@ -67,6 +67,12 @@ abstract class RestService
     protected $paramSpecs = [];
 
     /**
+     * Route arguments captured by the router (e.g., from path parameters)
+     * @var array
+     */
+    protected $routeArgs = [];
+
+    /**
      * Main entry point for handling REST requests
      * 
      * This method is called by the router when a request matches a service route.
@@ -81,6 +87,8 @@ abstract class RestService
     public function handle(...$args)
     {
         try {
+            // Store route args for param extraction (e.g., 'path' source)
+            $this->routeArgs = $args;
             // Step 1: Validate all parameters according to paramSpecs
             // This populates $this->params with validated values
             $this->params = $this->validate();
@@ -135,10 +143,9 @@ abstract class RestService
      * Abstract method that must be implemented by child classes
      * Contains the main business logic for the REST service
      * 
-     * @param mixed $id Optional ID parameter (for resource-based endpoints)
      * @return mixed Service response data
      */
-    abstract protected function process($id = null);
+    abstract protected function process();
 
     /**
      * Get JSON body from the request
@@ -229,6 +236,11 @@ abstract class RestService
         $name = $spec['name'];
         
         switch ($source) {
+            case 'path':
+                // Extract from router-captured path params by position
+                // Optionally support 'index' in spec (default 0)
+                $idx = isset($spec['index']) ? (int)$spec['index'] : 0;
+                return isset($this->routeArgs[$idx]) ? $this->routeArgs[$idx] : ($spec['default'] ?? null);
             case 'get':
                 // Extract from GET parameters
                 return isset($_GET[$name]) ? $_GET[$name] : ($spec['default'] ?? null);
@@ -282,6 +294,3 @@ abstract class RestService
     }
 }
 ?>
-
-
-

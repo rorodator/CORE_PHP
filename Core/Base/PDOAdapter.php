@@ -55,7 +55,9 @@ class PDOAdapter implements DBInterface
         try {
             $this->pdo = new PDO($this->dsn, $this->username, $this->password, $this->options);
         } catch (PDOException $e) {
-            throw new \RuntimeException('PDO connection failed: ' . $e->getMessage());
+            // Log detailed error server-side, but do not leak details to UI
+            core()->log->error('DB connect failed: ' . $e->getMessage() . ' DSN=' . $this->dsn);
+            throw new \RuntimeException('Database connection error');
         }
     }
 
@@ -97,49 +99,74 @@ class PDOAdapter implements DBInterface
     public function execute($sql, array $params = [])
     {
         $this->ensureConnected();
-        if (empty($params)) {
-            return $this->pdo->exec($sql);
+        try {
+            if (empty($params)) {
+                return $this->pdo->exec($sql);
+            }
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->rowCount();
+        } catch (PDOException $e) {
+            $this->logSqlError('execute', $sql, $params, $e);
+            throw new \RuntimeException('Database error');
         }
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->rowCount();
     }
 
     /** @inheritDoc */
     public function query($sql, array $params = [])
     {
         $this->ensureConnected();
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            $this->logSqlError('query', $sql, $params, $e);
+            throw new \RuntimeException('Database error');
+        }
     }
 
     /** @inheritDoc */
     public function queryOne($sql, array $params = [])
     {
         $this->ensureConnected();
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row !== false ? $row : null;
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $row !== false ? $row : null;
+        } catch (PDOException $e) {
+            $this->logSqlError('queryOne', $sql, $params, $e);
+            throw new \RuntimeException('Database error');
+        }
     }
 
     /** @inheritDoc */
     public function queryValue($sql, array $params = [])
     {
         $this->ensureConnected();
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        $value = $stmt->fetchColumn(0);
-        return $value !== false ? $value : null;
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $value = $stmt->fetchColumn(0);
+            return $value !== false ? $value : null;
+        } catch (PDOException $e) {
+            $this->logSqlError('queryValue', $sql, $params, $e);
+            throw new \RuntimeException('Database error');
+        }
     }
 
     /** @inheritDoc */
     public function prepare($sql)
     {
         $this->ensureConnected();
-        $stmt = $this->pdo->prepare($sql);
-        return new PDOStatementAdapter($stmt);
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return new PDOStatementAdapter($stmt);
+        } catch (PDOException $e) {
+            $this->logSqlError('prepare', $sql, [], $e);
+            throw new \RuntimeException('Database error');
+        }
     }
 
     /**
@@ -152,6 +179,21 @@ class PDOAdapter implements DBInterface
         if (!$this->pdo instanceof PDO) {
             $this->connect();
         }
+    }
+
+    /**
+     * Log SQL error details to server log.
+     *
+     * @param string $action
+     * @param string $sql
+     * @param array $params
+     * @param PDOException $e
+     * @return void
+     */
+    private function logSqlError($action, $sql, array $params, PDOException $e)
+    {
+        $safeParams = @json_encode($params);
+        core()->log->error("DB {$action} failed: " . $e->getMessage() . " SQL=" . $sql . " PARAMS=" . $safeParams);
     }
 }
 

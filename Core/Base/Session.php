@@ -18,6 +18,22 @@ class Session
     public function start()
     {
         if (session_status() === PHP_SESSION_NONE) {
+            // Keep session alive across browser restarts (dev-friendly)
+            // 30 days lifetime, cookie scoped to project base path
+            $cookiePath = '/MyManager';
+            $lifetime = 60 * 60 * 24 * 30; // 30 days
+            if (PHP_VERSION_ID >= 70300) {
+                session_set_cookie_params([
+                    'lifetime' => $lifetime,
+                    'path' => $cookiePath,
+                    'secure' => false,
+                    'httponly' => true,
+                    'samesite' => 'Lax'
+                ]);
+            } else {
+                // Fallback for older PHP versions
+                session_set_cookie_params($lifetime, $cookiePath);
+            }
             session_start();
         }
     }

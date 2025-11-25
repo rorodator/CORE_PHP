@@ -11,4 +11,3 @@
 function core($configIniPath = null) {
     return \Core\Base\Core::getInstance($configIniPath);
 }
-?>

@@ -87,6 +87,9 @@ abstract class RestService
     public function handle(...$args)
     {
         try {
+            // Start output buffering to catch any accidental output
+            if (!ob_get_level()) { ob_start(); }
+
             // Store route args for param extraction (e.g., 'path' source)
             $this->routeArgs = $args;
             // Step 1: Validate all parameters according to paramSpecs
@@ -184,6 +187,11 @@ abstract class RestService
      */
     protected function sendJson($data, $status = 'SUCCESS')
     {
+        // Clear any previously buffered output to avoid leading whitespace
+        if (ob_get_level()) {
+            while (ob_get_level()) { ob_end_clean(); }
+        }
+
         // Always return HTTP 200 for successful requests
         // The functional status is handled by the client
         http_response_code(200);
@@ -293,4 +301,3 @@ abstract class RestService
         return $value;
     }
 }
-?>

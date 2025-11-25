@@ -154,7 +154,6 @@ class ParamValidator
         return $str;
     }
 }
-?>
 
 
 

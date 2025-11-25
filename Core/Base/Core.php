@@ -121,7 +121,6 @@ class Core {
 function core($configIniPath = null) {
     return Core::getInstance($configIniPath);
 }
-?>
 
 
 

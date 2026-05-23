@@ -10,9 +10,9 @@ namespace Core\Base;
 class Router
 {
     /**
-     * Maximum accepted length for the raw `page` parameter.
+     * Maximum accepted length for a resolved request path.
      */
-    const MAX_PAGE_LENGTH = 1024;
+    const MAX_PATH_LENGTH = 1024;
 
     /**
      * File extensions that must never be served directly via readfile().
@@ -87,103 +87,168 @@ class Router
     }
 
     /**
-     * Main routing method that determines whether to route API or content requests
+     * Main routing method — resolves the request path from the URL (REST-style)
+     * and dispatches to API services or static/SPA content.
      *
+     * The path is taken from `REQUEST_URI`, never from `$_REQUEST` / POST body.
+     * An explicit `$path` may be supplied for tests or internal calls.
+     *
+     * @param string|null $path Optional pre-resolved relative path (skips URI parsing).
      * @return void
      */
-    public function route()
+    public function route(?string $path = null)
     {
-        $rawPage = isset($_REQUEST['page']) ? (string)$_REQUEST['page'] : '';
-        $page = $this->sanitizePagePath($rawPage);
+        $rawPath = $path ?? $this->resolveRequestPath();
+        $resolved = $this->sanitizePath($rawPath);
 
-        if ($page === null) {
+        if ($resolved === null) {
             http_response_code(400);
-            $this->emitInvalidPage($rawPage);
+            $this->emitInvalidPath($rawPath);
             return;
         }
 
-        if (strpos($page, 'api/') === 0) {
-            $this->routeApi($page);
+        if (strpos($resolved, 'api/') === 0) {
+            $this->routeApi($resolved);
         } else {
-            $this->routeContent($page);
+            $this->routeContent($resolved);
         }
     }
 
     /**
-     * Sanitize the raw `page` request parameter.
+     * Resolve the application-relative path from the current HTTP request URI.
+     *
+     * Strips the configured or auto-detected base path (e.g. `/MyJourney`) and
+     * normalises a direct front-controller hit (`/index.php`, `/index.php/...`).
+     *
+     * @return string Raw relative path before sanitization (may be empty).
+     */
+    protected function resolveRequestPath(): string
+    {
+        $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        if (!is_string($uriPath) || $uriPath === '') {
+            return '';
+        }
+
+        $path = rawurldecode($uriPath);
+        $basePath = $this->getBasePath();
+
+        if ($basePath !== '' && strncmp($path, $basePath, strlen($basePath)) === 0) {
+            $path = substr($path, strlen($basePath));
+        }
+
+        $path = trim($path, '/');
+
+        if ($path === 'index.php') {
+            return '';
+        }
+        if (strncmp($path, 'index.php/', 10) === 0) {
+            $path = substr($path, 10);
+        }
+
+        return trim($path, '/');
+    }
+
+    /**
+     * Application URL prefix (e.g. `/MyJourney` when deployed in a subdirectory).
+     *
+     * Priority: `[parameters] base_path` in config, else dirname of `SCRIPT_NAME`.
+     *
+     * @return string Base path without trailing slash, or empty at document root.
+     */
+    protected function getBasePath(): string
+    {
+        try {
+            $config = core()->getConfigSection('parameters');
+            if (isset($config['base_path']) && is_string($config['base_path'])) {
+                $configured = trim($config['base_path']);
+                if ($configured !== '' && $configured !== '/') {
+                    return rtrim(str_replace('\\', '/', $configured), '/');
+                }
+                return '';
+            }
+        } catch (\Exception $e) {
+            // fall through to SCRIPT_NAME detection
+        }
+
+        $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+        $dir = rtrim(dirname($script), '/');
+        if ($dir === '' || $dir === '/' || $dir === '.') {
+            return '';
+        }
+        return $dir;
+    }
+
+    /**
+     * Sanitize a relative request path.
      *
      * Returns the sanitized path (always relative, never empty for traversal),
-     * an empty string for "no page", or null if the input is unsafe.
+     * an empty string for "no path", or null if the input is unsafe.
      *
      * Rules:
      * - reject null bytes and backslashes (cross-OS path separators);
      * - reject Windows drive prefixes and URL schemes;
      * - reject `..` and `.` segments and empty segments (no double-slash);
      * - allow only `[A-Za-z0-9._/-]`;
-     * - cap length to MAX_PAGE_LENGTH.
+     * - cap length to MAX_PATH_LENGTH.
      *
-     * @param string $rawPage Raw value from the request.
+     * @param string $rawPath Raw relative path from the URL.
      * @return string|null Sanitized relative path, or null when unsafe.
      */
-    protected function sanitizePagePath($rawPage)
+    protected function sanitizePath($rawPath)
     {
-        if (!is_string($rawPage)) {
+        if (!is_string($rawPath)) {
             return null;
         }
-        if (strlen($rawPage) > self::MAX_PAGE_LENGTH) {
+        if (strlen($rawPath) > self::MAX_PATH_LENGTH) {
             return null;
         }
 
-        $page = trim($rawPage, "/");
-        if ($page === '') {
+        $path = trim($rawPath, "/");
+        if ($path === '') {
             return '';
         }
 
-        // Null byte or backslash anywhere → reject upfront.
-        if (strpos($page, "\0") !== false || strpos($page, '\\') !== false) {
+        if (strpos($path, "\0") !== false || strpos($path, '\\') !== false) {
             return null;
         }
 
-        // Windows drive prefix (`C:`) or URL scheme (`http://`, `file://`, …).
-        if (preg_match('#^[a-zA-Z]:#', $page)) {
+        if (preg_match('#^[a-zA-Z]:#', $path)) {
             return null;
         }
-        if (preg_match('#^[a-z][a-z0-9+\-.]*://#i', $page)) {
-            return null;
-        }
-
-        // Whitelist allowed characters only.
-        if (!preg_match('#^[A-Za-z0-9._/\-]+$#', $page)) {
+        if (preg_match('#^[a-z][a-z0-9+\-.]*://#i', $path)) {
             return null;
         }
 
-        // Reject traversal segments and empty segments (double slashes).
-        foreach (explode('/', $page) as $segment) {
+        if (!preg_match('#^[A-Za-z0-9._/\-]+$#', $path)) {
+            return null;
+        }
+
+        foreach (explode('/', $path) as $segment) {
             if ($segment === '' || $segment === '.' || $segment === '..') {
                 return null;
             }
         }
 
-        return $page;
+        return $path;
     }
 
     /**
-     * Emit a minimal error payload when the page parameter is rejected.
+     * Emit a minimal error payload when the request path is rejected.
      * JSON for API-looking requests, plain text otherwise.
      *
-     * @param string $rawPage Original raw value (not echoed back).
+     * @param string $rawPath Original raw value (not echoed back).
      * @return void
      */
-    protected function emitInvalidPage($rawPage)
+    protected function emitInvalidPath($rawPath)
     {
-        $looksLikeApi = strpos(ltrim((string)$rawPage, '/'), 'api/') === 0;
+        $looksLikeApi = strpos(ltrim((string)$rawPath, '/'), 'api/') === 0;
         if ($looksLikeApi) {
             header('Content-Type: application/json');
-            echo json_encode(['error' => true, 'message' => 'Invalid page parameter']);
+            echo json_encode(['error' => true, 'message' => 'Invalid request path']);
             return;
         }
         header('Content-Type: text/plain; charset=utf-8');
-        echo "Invalid page parameter.";
+        echo "Invalid request path.";
     }
 
     /**
@@ -219,7 +284,7 @@ class Router
     /**
      * Route content requests to static files or PHP scripts.
      *
-     * `$page` is assumed sanitized by sanitizePagePath(); a realpath() boundary
+     * `$page` is assumed sanitized by sanitizePath(); a realpath() boundary
      * check still confirms the resolved file lives inside the WWW root, and
      * forbidden extensions are blocked to avoid leaking server-side sources.
      *

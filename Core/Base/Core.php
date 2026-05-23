@@ -36,15 +36,56 @@ class Core {
     /**
      * Private constructor for singleton pattern
      *
-     * @param string $configIniPath Path to the configuration INI file
+     * @param string|null $configIniPath Path to the configuration INI file
+     * @param array|null  $preloadedConfig Pre-parsed config (skips INI read when set)
      * @throws \Exception If config file is not readable
      */
-    private function __construct($configIniPath) {
-        if (!is_readable($configIniPath)) {
-            throw new \Exception("Config file not found or not readable: $configIniPath");
+    private function __construct($configIniPath = null, ?array $preloadedConfig = null) {
+        if ($preloadedConfig !== null) {
+            $this->config = $preloadedConfig;
+        } else {
+            if ($configIniPath === null || !is_readable($configIniPath)) {
+                throw new \Exception("Config file not found or not readable: $configIniPath");
+            }
+            $this->config = parse_ini_file($configIniPath, true);
         }
-        $this->config = parse_ini_file($configIniPath, true);
         $this->serviceFactory = isset($this->config['services']) ? $this->config['services'] : [];
+    }
+
+    /**
+     * Boot Core from a pre-merged configuration array (environment overlays).
+     *
+     * @param array $config Full merged INI structure (sections as keys).
+     * @return Core
+     */
+    public static function bootFromConfig(array $config): self
+    {
+        if (self::$instance === null) {
+            self::$instance = new self(null, $config);
+        }
+        return self::$instance;
+    }
+
+    /**
+     * Deep-merge INI-style section arrays (overlay wins on leaf keys).
+     *
+     * @param array $base
+     * @param array $overlay
+     * @return array
+     */
+    public static function mergeConfig(array $base, array $overlay): array
+    {
+        foreach ($overlay as $section => $values) {
+            if (!is_array($values)) {
+                continue;
+            }
+            if (!isset($base[$section]) || !is_array($base[$section])) {
+                $base[$section] = $values;
+                continue;
+            }
+            $base[$section] = array_merge($base[$section], $values);
+        }
+        return $base;
     }
 
     /**

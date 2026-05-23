@@ -325,7 +325,19 @@ class Router
             return;
         }
 
-        $indexHtml = $rootReal . DIRECTORY_SEPARATOR . 'index.html';
+        $this->serveContentShell($rootReal);
+    }
+
+    /**
+     * Fallback when no explicit static file matched — serves the SPA HTML shell.
+     * Applications may override to inject environment config into the template.
+     *
+     * @param string $wwwRootReal Absolute realpath of the configured WWW root.
+     * @return void
+     */
+    protected function serveContentShell($wwwRootReal)
+    {
+        $indexHtml = $wwwRootReal . DIRECTORY_SEPARATOR . 'index.html';
         if (is_file($indexHtml) && is_readable($indexHtml)) {
             $mime = mime_content_type($indexHtml);
             header('Content-Type: ' . $mime);

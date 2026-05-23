@@ -1,20 +1,34 @@
 <?php
 namespace Core\Rest\Lang;
 
+use Core\Base\HttpMethod;
 use Core\Base\RestService;
+use Core\Base\SecurityLevel;
 
 /**
  * Class LangGetService
  *
  * REST service for retrieving language labels.
- * Handles only label retrieval (GET) operations.
- * 
- * Endpoints:
- * - POST /api/lang/labels - Get all labels for a language (lang in JSON body)
- * - POST /api/lang/labels - Get specific label (lang and key in JSON body)
+ *
+ * Endpoint: POST /api/lang/labels
+ * Public — labels are not user-specific and may be loaded before login.
  */
 class LangGetService extends RestService
 {
+    protected SecurityLevel $securityLevel = SecurityLevel::Public;
+
+    protected ?HttpMethod $httpMethod = HttpMethod::Post;
+
+    /** @var array<string, mixed> */
+    protected array $security = [
+        'auth'             => false,
+        'public'           => true,
+        'resource'         => 'lang',
+        'resourceIdParam'  => null,
+        'operation'        => 'read_labels',
+        'visibilityAware'  => false,
+    ];
+
     /**
      * Parameter specifications for this service.
      * @var array
@@ -43,7 +57,7 @@ class LangGetService extends RestService
      * 
      * @return array Response with labels
      */
-    protected function process($id = null)
+    protected function process()
     {
         $lang = $this->params['lang'] ?? 'fr';
         $key = $this->params['key'] ?? null;

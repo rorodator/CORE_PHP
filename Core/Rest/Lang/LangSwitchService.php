@@ -1,19 +1,34 @@
 <?php
 namespace Core\Rest\Lang;
 
+use Core\Base\HttpMethod;
 use Core\Base\RestService;
+use Core\Base\SecurityLevel;
 
 /**
  * Class LangSwitchService
  *
- * REST service for switching to the next available language.
- * Handles only language switching (GET) operations.
- * 
- * Endpoint:
- * - GET /api/lang/switch - Switch to next available language
+ * REST service for cycling through available languages.
+ *
+ * Endpoint: GET /api/lang/switch
+ * Public — anonymous visitors may switch language.
  */
 class LangSwitchService extends RestService
 {
+    protected SecurityLevel $securityLevel = SecurityLevel::Public;
+
+    protected ?HttpMethod $httpMethod = HttpMethod::Get;
+
+    /** @var array<string, mixed> */
+    protected array $security = [
+        'auth'             => false,
+        'public'           => true,
+        'resource'         => 'lang',
+        'resourceIdParam'  => null,
+        'operation'        => 'switch_session_lang',
+        'visibilityAware'  => false,
+    ];
+
     /**
      * Parameter specifications for this service.
      * @var array
@@ -25,7 +40,7 @@ class LangSwitchService extends RestService
      * 
      * @return array Response with new language
      */
-    protected function process($id = null)
+    protected function process()
     {
         try {
             $langService = core()->lang;

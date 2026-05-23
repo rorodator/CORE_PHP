@@ -10,6 +10,23 @@ namespace Core\Base;
 class Router
 {
     /**
+     * Maximum accepted length for the raw `page` parameter.
+     */
+    const MAX_PAGE_LENGTH = 1024;
+
+    /**
+     * File extensions that must never be served directly via readfile().
+     * Defense-in-depth: prevents leaking server-side source / config if such a file
+     * happens to exist under the configured WWW root.
+     *
+     * @var string[]
+     */
+    protected static $forbiddenExtensions = [
+        'php', 'phtml', 'phar', 'phps', 'pl', 'py', 'rb', 'sh', 'cgi',
+        'env', 'ini', 'htaccess', 'htpasswd', 'sqlite', 'sql',
+    ];
+
+    /**
      * Array of route patterns mapped to service classes
      * @var array
      */
@@ -76,13 +93,97 @@ class Router
      */
     public function route()
     {
-        $page = isset($_REQUEST['page']) ? trim($_REQUEST['page'], "/") : '';
+        $rawPage = isset($_REQUEST['page']) ? (string)$_REQUEST['page'] : '';
+        $page = $this->sanitizePagePath($rawPage);
+
+        if ($page === null) {
+            http_response_code(400);
+            $this->emitInvalidPage($rawPage);
+            return;
+        }
 
         if (strpos($page, 'api/') === 0) {
             $this->routeApi($page);
         } else {
             $this->routeContent($page);
         }
+    }
+
+    /**
+     * Sanitize the raw `page` request parameter.
+     *
+     * Returns the sanitized path (always relative, never empty for traversal),
+     * an empty string for "no page", or null if the input is unsafe.
+     *
+     * Rules:
+     * - reject null bytes and backslashes (cross-OS path separators);
+     * - reject Windows drive prefixes and URL schemes;
+     * - reject `..` and `.` segments and empty segments (no double-slash);
+     * - allow only `[A-Za-z0-9._/-]`;
+     * - cap length to MAX_PAGE_LENGTH.
+     *
+     * @param string $rawPage Raw value from the request.
+     * @return string|null Sanitized relative path, or null when unsafe.
+     */
+    protected function sanitizePagePath($rawPage)
+    {
+        if (!is_string($rawPage)) {
+            return null;
+        }
+        if (strlen($rawPage) > self::MAX_PAGE_LENGTH) {
+            return null;
+        }
+
+        $page = trim($rawPage, "/");
+        if ($page === '') {
+            return '';
+        }
+
+        // Null byte or backslash anywhere → reject upfront.
+        if (strpos($page, "\0") !== false || strpos($page, '\\') !== false) {
+            return null;
+        }
+
+        // Windows drive prefix (`C:`) or URL scheme (`http://`, `file://`, …).
+        if (preg_match('#^[a-zA-Z]:#', $page)) {
+            return null;
+        }
+        if (preg_match('#^[a-z][a-z0-9+\-.]*://#i', $page)) {
+            return null;
+        }
+
+        // Whitelist allowed characters only.
+        if (!preg_match('#^[A-Za-z0-9._/\-]+$#', $page)) {
+            return null;
+        }
+
+        // Reject traversal segments and empty segments (double slashes).
+        foreach (explode('/', $page) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                return null;
+            }
+        }
+
+        return $page;
+    }
+
+    /**
+     * Emit a minimal error payload when the page parameter is rejected.
+     * JSON for API-looking requests, plain text otherwise.
+     *
+     * @param string $rawPage Original raw value (not echoed back).
+     * @return void
+     */
+    protected function emitInvalidPage($rawPage)
+    {
+        $looksLikeApi = strpos(ltrim((string)$rawPage, '/'), 'api/') === 0;
+        if ($looksLikeApi) {
+            header('Content-Type: application/json');
+            echo json_encode(['error' => true, 'message' => 'Invalid page parameter']);
+            return;
+        }
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Invalid page parameter.";
     }
 
     /**
@@ -116,9 +217,13 @@ class Router
     }
 
     /**
-     * Route content requests to static files or PHP scripts
+     * Route content requests to static files or PHP scripts.
      *
-     * @param string $page The content page path
+     * `$page` is assumed sanitized by sanitizePagePath(); a realpath() boundary
+     * check still confirms the resolved file lives inside the WWW root, and
+     * forbidden extensions are blocked to avoid leaking server-side sources.
+     *
+     * @param string $page Sanitized relative path (may be empty).
      * @return void
      */
     protected function routeContent($page)
@@ -126,22 +231,36 @@ class Router
         $config = core()->getConfigSection('parameters');
         $wwwRoot = isset($config['www_root']) ? $config['www_root'] : 'WWW';
 
-        $file = $wwwRoot . '/' . ($page ?: 'index.html');
-
-        if (is_file($file) && is_readable($file)) {
-            $mime = mime_content_type($file);
-            header('Content-Type: ' . $mime);
-            readfile($file);
+        $rootReal = realpath($wwwRoot);
+        if ($rootReal === false) {
+            http_response_code(500);
+            echo "WWW root not configured.";
             return;
         }
 
-        $indexPhp = $wwwRoot . '/index.php';
+        if ($page !== '' && !$this->hasForbiddenExtension($page)) {
+            $candidate = $rootReal . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $page);
+            $candidateReal = realpath($candidate);
+
+            if ($candidateReal !== false
+                && $this->isPathInside($candidateReal, $rootReal)
+                && is_file($candidateReal)
+                && is_readable($candidateReal)
+                && !$this->hasForbiddenExtension($candidateReal)) {
+                $mime = mime_content_type($candidateReal);
+                header('Content-Type: ' . $mime);
+                readfile($candidateReal);
+                return;
+            }
+        }
+
+        $indexPhp = $rootReal . DIRECTORY_SEPARATOR . 'index.php';
         if (is_file($indexPhp) && is_readable($indexPhp)) {
             include $indexPhp;
             return;
         }
 
-        $indexHtml = $wwwRoot . '/index.html';
+        $indexHtml = $rootReal . DIRECTORY_SEPARATOR . 'index.html';
         if (is_file($indexHtml) && is_readable($indexHtml)) {
             $mime = mime_content_type($indexHtml);
             header('Content-Type: ' . $mime);
@@ -151,6 +270,38 @@ class Router
 
         http_response_code(404);
         echo "Page not found.";
+    }
+
+    /**
+     * Check that an absolute path is contained within a base directory.
+     *
+     * @param string $path Absolute path to test.
+     * @param string $base Absolute base directory.
+     * @return bool
+     */
+    protected function isPathInside($path, $base)
+    {
+        $base = rtrim($base, "/\\");
+        if ($path === $base) {
+            return true;
+        }
+        $prefix = $base . DIRECTORY_SEPARATOR;
+        return strncmp($path, $prefix, strlen($prefix)) === 0;
+    }
+
+    /**
+     * Tell whether a file path uses an extension blocked from direct serving.
+     *
+     * @param string $path Path or filename.
+     * @return bool
+     */
+    protected function hasForbiddenExtension($path)
+    {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if ($ext === '') {
+            return false;
+        }
+        return in_array($ext, self::$forbiddenExtensions, true);
     }
 
     /**
@@ -165,7 +316,3 @@ class Router
         $this->routes[$pattern] = $serviceClass;
     }
 }
-?>
-
-
-

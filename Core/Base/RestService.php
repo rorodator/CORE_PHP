@@ -1,162 +1,637 @@
 <?php
 namespace Core\Base;
 
+use Core\Exception\CoreSecurityException;
+
 /**
  * Class RestService
  *
  * Abstract base class for REST API services in the CORE framework.
- * 
- * This class provides a standardized foundation for building REST API endpoints
- * with automatic parameter validation, request handling, and response formatting.
- * 
- * Key Features:
- * - Automatic parameter validation using paramSpecs
- * - Support for multiple parameter sources (GET, POST, JSON, REQUEST)
- * - JSON path navigation for nested parameters
- * - Standardized error handling and response formatting
- * - Integration with the CORE ParamValidator service
- * - Functional status codes (not HTTP status codes) for business logic
- * - Separation of concerns: backend provides status, frontend handles UI messages
- * 
- * Usage:
- * 1. Extend this class in your service
- * 2. Define $paramSpecs array with parameter specifications
- * 3. Implement the process() method with your business logic
- * 4. Access validated parameters via $this->params
- * 
- * Response Format:
- * The process() method should return an array with exactly two keys:
- * - 'data': Contains the actual response data (always present for successful GET operations)
- * - 'status': Functional status code (not HTTP status) for business logic handling
- * 
- * IMPORTANT: NEVER include user-facing messages in the response!
- * The frontend is responsible for displaying success/error messages based on the status.
- * The backend only provides the functional status, never UI messages.
- * 
- * Example responses:
- * Success: ['data' => $labels, 'status' => 'SUCCESS']
- * Business error: ['data' => null, 'status' => 'TEAM_EXISTS']
- * 
- * Real-world example (Team creation):
- * - Success: ['data' => $teamData, 'status' => 'SUCCESS']
- * - Name exists: ['data' => null, 'status' => 'TEAM_EXISTS']
- * - No permission: ['data' => null, 'status' => 'INSUFFICIENT_RIGHTS']
- * 
- * WRONG: ['data' => $teamData, 'status' => 'SUCCESS', 'message' => 'Team created!']
- * RIGHT: ['data' => $teamData, 'status' => 'SUCCESS']
- * 
- * Example paramSpecs:
- * [
- *     ['name' => 'lang', 'type' => 'string', 'source' => 'json', 'default' => 'fr'],
- *     ['name' => 'key', 'type' => 'string', 'source' => 'json', 'required' => false]
- * ]
+ *
+ * Provides a standardized foundation for building REST API endpoints
+ * with declarative security, HTTP method enforcement, automatic parameter
+ * validation, and standardized response formatting.
+ *
+ * Required declarations in every concrete service:
+ * - `$securityLevel` (SecurityLevel) — the access level (deny-by-default).
+ * - `$httpMethod`    (HttpMethod)    — the expected request method.
+ * - `$security`      (array)         — declarative metadata for audit/visibility.
+ *
+ * Optional declaration (defaults applied when omitted):
+ * - `$policy`        (array)         — cross-cutting policy (csrf, rateLimit, audit).
+ *
+ * Lifecycle (`handle()`):
+ *  1. Declarations are present and coherent (else 500).
+ *  2. The request HTTP method matches the declared one (else 405).
+ *  3. Rate-limit gate (else 429).
+ *  4. CSRF gate for state-changing methods (else 403).
+ *  5. Parameters are validated against `$paramSpecs` (else 400).
+ *  6. The declared security level is enforced with `$this->params` available (else 401/403).
+ *  7. `process()` runs the business logic with no direct arguments.
+ *  8. Audit hook fires (best-effort, never throws).
+ *  9. Response is formatted (data + functional status, HTTP 200 on success).
+ *
+ * Response format (success):
+ *   ['data' => mixed, 'status' => 'SUCCESS' | 'XXX']
+ *
+ * The HTTP status is always 200 for normal flows; functional outcomes
+ * are conveyed through the `status` string (e.g. `TEAM_EXISTS`).
  */
 abstract class RestService
 {
     /**
-     * Validated parameters from the request
+     * Required declarative metadata keys for `$security`.
+     * @var string[]
+     */
+    private const REQUIRED_SECURITY_KEYS = [
+        'auth', 'public', 'resource', 'resourceIdParam', 'operation', 'visibilityAware',
+    ];
+
+    /**
+     * Default values applied to every service's `$policy`.
+     * Concrete services may override individual keys; unknown keys are refused.
+     */
+    private const DEFAULT_POLICY = [
+        'csrf'      => true,
+        'rateLimit' => 'standard',
+        'audit'     => true,
+    ];
+
+    /**
+     * Whitelist of keys a service is allowed to override in `$policy`.
+     * @var string[]
+     */
+    private const ALLOWED_POLICY_KEYS = ['csrf', 'rateLimit', 'audit'];
+
+    /**
+     * Functional status returned in the JSON body when a SecurityLevel
+     * declaration is missing or incoherent (server-side bug).
+     */
+    private const STATUS_DECLARATION_ERROR = 'SECURITY_DECLARATION_ERROR';
+
+    /**
+     * Required: every concrete service MUST replace this default
+     * with an explicit SecurityLevel value (deny-by-default).
+     */
+    protected SecurityLevel $securityLevel = SecurityLevel::Undefined;
+
+    /**
+     * Required: expected HTTP method for this endpoint.
+     * The actual request method must match exactly, otherwise 405.
+     */
+    protected ?HttpMethod $httpMethod = null;
+
+    /**
+     * Required: declarative metadata describing the endpoint.
+     *
+     * Required keys (values may be null where not applicable):
+     * - `auth`            (bool)        — true if the endpoint requires authentication.
+     * - `public`          (bool)        — true if the endpoint serves publicly visible data.
+     * - `resource`        (string|null) — domain resource (e.g. 'journey', 'update').
+     * - `resourceIdParam` (string|null) — request param holding the resource id (path/json key).
+     * - `operation`       (string)      — read | create | update | delete | publish | share | admin | ai_action | ...
+     * - `visibilityAware` (bool)        — endpoint enforces public/private visibility.
+     *
+     * @var array<string, mixed>
+     */
+    protected array $security = [];
+
+    /**
+     * Optional cross-cutting policy. Keys are merged with `DEFAULT_POLICY`;
+     * only keys listed in `ALLOWED_POLICY_KEYS` are accepted.
+     *
+     * Supported keys:
+     * - `csrf`      (bool)        — verify a CSRF token on state-changing methods. Default: true.
+     * - `rateLimit` (string|false)— named bucket (e.g. 'standard', 'auth', 'ai'); false to disable. Default: 'standard'.
+     * - `audit`     (bool)        — emit a structured audit log entry per call. Default: true.
+     *
+     * @var array<string, mixed>
+     */
+    protected array $policy = [];
+
+    /**
+     * Validated parameters from the request.
      * @var array
      */
     protected $params = [];
 
     /**
-     * Parameter specifications for validation
-     * Should be defined in child classes
+     * Parameter specifications for validation; defined in child classes.
      * @var array
      */
     protected $paramSpecs = [];
 
     /**
-     * Route arguments captured by the router (e.g., from path parameters)
+     * Route captures passed by the router.
+     * They are only exposed through `paramSpecs` with `source => path`;
+     * concrete services must read validated values from `$this->params`.
      * @var array
      */
     protected $routeArgs = [];
 
+    // ---------------------------------------------------------------------
+    // Lifecycle
+    // ---------------------------------------------------------------------
+
     /**
-     * Main entry point for handling REST requests
-     * 
-     * This method is called by the router when a request matches a service route.
-     * It handles the complete request lifecycle:
-     * 1. Validates parameters according to paramSpecs
-     * 2. Calls the process() method implemented by child classes
-     * 3. Formats and sends the response
+     * Main entry point invoked by the Router.
      *
-     * @param mixed ...$args Arguments passed from the router
-     * @return mixed Service response or null if JSON was sent directly
+     * @param mixed ...$args Optional route captures used only by `source => path`.
+     * @return mixed|null
      */
     public function handle(...$args)
     {
         try {
-            // Start output buffering to catch any accidental output
             if (!ob_get_level()) { ob_start(); }
-
-            // Store route args for param extraction (e.g., 'path' source)
             $this->routeArgs = $args;
-            // Step 1: Validate all parameters according to paramSpecs
-            // This populates $this->params with validated values
+
+            // 1. Mandatory declarations.
+            $this->assertSecurityDeclared();
+            $this->assertHttpMethodDeclared();
+            $this->assertSecurityMetadata();
+            $this->assertSecurityCoherent();
+            $this->assertPolicyKnown();
+
+            // 2. Method check (cheap, run before any side effect).
+            $this->assertHttpMethodMatches();
+
+            // 3. Policy gates: rate-limit then CSRF (cheapest first).
+            $this->enforceRateLimit();
+            $this->enforceCsrf();
+
+            // 4. Parameter validation. Security callbacks can safely use `$this->params`.
             $this->params = $this->validate();
-            
-            // Step 2: Call the business logic implemented by child classes
-            $result = $this->process(...$args);
-            
-            // Step 3: Handle response formatting
-            // If result has 'data' and 'status' keys, send JSON response directly
-            // Note: 'status' here is a functional status code (e.g., 'SUCCESS', 'TEAM_EXISTS')
-            // not an HTTP status code. The HTTP status is always 200 for successful requests.
+
+            // 5. Authorization.
+            $this->enforceSecurity();
+
+            // 6. Business logic. Concrete services read only `$this->params`.
+            $result = $this->process();
+
+            // 7. Audit (best-effort, must not throw).
+            $this->auditCall($result);
+
+            // 8. Response formatting (compatible with previous contract).
             if (is_array($result) && array_key_exists('data', $result) && array_key_exists('status', $result)) {
                 $this->sendJson($result['data'], $result['status']);
             } else {
-                // Return result for further processing by the router
                 return $result;
             }
+        } catch (CoreSecurityException $e) {
+            return $this->sendSecurityError($e);
         } catch (\Exception $e) {
-            // Handle any errors during processing
             return $this->errorResponse($e->getMessage(), 400);
         }
     }
 
     /**
-     * Validate request parameters according to paramSpecs
-     * 
-     * This method processes each parameter specification defined in $paramSpecs:
-     * 1. Extracts the parameter value from the appropriate source (GET, POST, JSON, etc.)
-     * 2. Validates the value using the ParamValidator service
-     * 3. Returns an array of validated parameters accessible via $this->params
+     * Business logic implemented by concrete services.
      *
-     * @return array Validated parameters
-     * @throws \Exception If validation fails
+     * @return mixed
+     */
+    abstract protected function process();
+
+    // ---------------------------------------------------------------------
+    // Security — declarations
+    // ---------------------------------------------------------------------
+
+    /**
+     * Refuse to serve a service that did not declare a security level.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function assertSecurityDeclared(): void
+    {
+        if ($this->securityLevel === SecurityLevel::Undefined) {
+            throw new CoreSecurityException(
+                'Security level must be explicitly declared on ' . static::class . '.',
+                500,
+                self::STATUS_DECLARATION_ERROR
+            );
+        }
+    }
+
+    /**
+     * Refuse to serve a service that did not declare its expected HTTP method.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function assertHttpMethodDeclared(): void
+    {
+        if ($this->httpMethod === null) {
+            throw new CoreSecurityException(
+                'Expected HTTP method must be declared on ' . static::class . '.',
+                500,
+                self::STATUS_DECLARATION_ERROR
+            );
+        }
+    }
+
+    /**
+     * All required `$security` metadata keys must be present.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function assertSecurityMetadata(): void
+    {
+        foreach (self::REQUIRED_SECURITY_KEYS as $key) {
+            if (!array_key_exists($key, $this->security)) {
+                throw new CoreSecurityException(
+                    "Missing security metadata key '{$key}' on " . static::class . '.',
+                    500,
+                    self::STATUS_DECLARATION_ERROR
+                );
+            }
+        }
+    }
+
+    /**
+     * Cross-check `$securityLevel` with `$security` flags so a typo in either
+     * place fails fast (e.g. `auth=false` with `securityLevel=Authenticated`).
+     *
+     * @throws CoreSecurityException
+     */
+    protected function assertSecurityCoherent(): void
+    {
+        $auth = (bool)$this->security['auth'];
+        if ($this->securityLevel === SecurityLevel::Public && $auth) {
+            throw new CoreSecurityException(
+                'Inconsistent security on ' . static::class . ': Public level cannot require auth.',
+                500,
+                self::STATUS_DECLARATION_ERROR
+            );
+        }
+        if ($this->securityLevel !== SecurityLevel::Public && !$auth) {
+            throw new CoreSecurityException(
+                'Inconsistent security on ' . static::class . ': non-Public level must set auth=true.',
+                500,
+                self::STATUS_DECLARATION_ERROR
+            );
+        }
+    }
+
+    /**
+     * Reject any unknown key declared in `$policy`. Catches typos at boot time.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function assertPolicyKnown(): void
+    {
+        foreach (array_keys($this->policy) as $key) {
+            if (!in_array($key, self::ALLOWED_POLICY_KEYS, true)) {
+                throw new CoreSecurityException(
+                    "Unknown policy key '{$key}' on " . static::class
+                        . '. Allowed: ' . implode(', ', self::ALLOWED_POLICY_KEYS) . '.',
+                    500,
+                    self::STATUS_DECLARATION_ERROR
+                );
+            }
+        }
+    }
+
+    /**
+     * Effective policy: declared values merged on top of `DEFAULT_POLICY`.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getEffectivePolicy(): array
+    {
+        return array_merge(self::DEFAULT_POLICY, $this->policy);
+    }
+
+    // ---------------------------------------------------------------------
+    // Security — runtime
+    // ---------------------------------------------------------------------
+
+    /**
+     * Verify the incoming HTTP method matches the declared one.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function assertHttpMethodMatches(): void
+    {
+        $actual = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? ''));
+        if ($actual === '' || $actual !== $this->httpMethod->value) {
+            throw new CoreSecurityException(
+                "HTTP method '{$actual}' not allowed for " . static::class . " (expected {$this->httpMethod->value}).",
+                405,
+                'METHOD_NOT_ALLOWED'
+            );
+        }
+    }
+
+    /**
+     * Dispatch to the appropriate authorization check based on `$securityLevel`.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function enforceSecurity(): void
+    {
+        switch ($this->securityLevel) {
+            case SecurityLevel::Public:
+                return;
+
+            case SecurityLevel::Authenticated:
+                $this->requireAuthenticated();
+                return;
+
+            case SecurityLevel::Admin:
+                $this->requireAuthenticated();
+                $this->requireRole('admin');
+                return;
+
+            case SecurityLevel::Owner:
+                $this->requireAuthenticated();
+                if (!$this->checkOwnership()) {
+                    throw new CoreSecurityException(
+                        'Forbidden: caller is not the owner of the resource.',
+                        403,
+                        'NOT_OWNER'
+                    );
+                }
+                return;
+
+            case SecurityLevel::Shared:
+                $this->requireAuthenticated();
+                if (!$this->checkSharedAccess()) {
+                    throw new CoreSecurityException(
+                        'Forbidden: caller has no shared access to the resource.',
+                        403,
+                        'NO_SHARE_ACCESS'
+                    );
+                }
+                return;
+
+            case SecurityLevel::Ai:
+                $this->requireAuthenticated();
+                if (!$this->checkAiAccess()) {
+                    throw new CoreSecurityException(
+                        'Forbidden: AI access denied for this caller.',
+                        403,
+                        'NO_AI_ACCESS'
+                    );
+                }
+                return;
+
+            default:
+                throw new CoreSecurityException(
+                    'Unknown security level: ' . $this->securityLevel->value,
+                    500,
+                    self::STATUS_DECLARATION_ERROR
+                );
+        }
+    }
+
+    /**
+     * Require the caller to have an authenticated session.
+     * Override to plug in a different auth mechanism.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function requireAuthenticated(): void
+    {
+        if (!core()->session->has('user')) {
+            throw new CoreSecurityException(
+                'Authentication required.',
+                401,
+                'UNAUTHENTICATED'
+            );
+        }
+    }
+
+    /**
+     * Require the connected user to have the given role.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function requireRole(string $role): void
+    {
+        $user = core()->session->get('user');
+        $roles = is_array($user) && isset($user['roles']) && is_array($user['roles'])
+            ? $user['roles']
+            : [];
+        if (!in_array($role, $roles, true)) {
+            throw new CoreSecurityException(
+                "Forbidden: missing role '{$role}'.",
+                403,
+                'MISSING_ROLE'
+            );
+        }
+    }
+
+    /**
+     * Override in services declaring SecurityLevel::Owner.
+     * Default deny — services MUST return true only when ownership is proven.
+     */
+    protected function checkOwnership(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Override in services declaring SecurityLevel::Shared.
+     * Default deny.
+     */
+    protected function checkSharedAccess(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Override in services declaring SecurityLevel::Ai.
+     * Default deny.
+     */
+    protected function checkAiAccess(): bool
+    {
+        return false;
+    }
+
+    // ---------------------------------------------------------------------
+    // Policy — rate limit / CSRF / audit
+    // ---------------------------------------------------------------------
+
+    /**
+     * Rate-limit gate. Default implementation only validates the bucket
+     * declaration; the actual counter store is project-specific and lives
+     * in an override (e.g. Redis-backed subclass) in MyJourney.
+     *
+     * Throw a CoreSecurityException(429, 'RATE_LIMITED') when the caller
+     * exceeds the bucket budget.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function enforceRateLimit(): void
+    {
+        $bucket = $this->getEffectivePolicy()['rateLimit'];
+        if ($bucket === false || $bucket === null) {
+            return;
+        }
+        if (!is_string($bucket) || $bucket === '') {
+            throw new CoreSecurityException(
+                'Invalid rateLimit policy on ' . static::class . '.',
+                500,
+                self::STATUS_DECLARATION_ERROR
+            );
+        }
+        // No global counter store yet — concrete enforcement is wired in
+        // a project-specific override. Keep this hook to make the policy
+        // explicit and audit-visible.
+    }
+
+    /**
+     * CSRF gate. Active only when `policy.csrf === true` and the request
+     * uses a state-changing HTTP method.
+     *
+     * Default behaviour: compare the request token against `csrf_token`
+     * stored in the session. If no token is in session yet (e.g. before
+     * the first authenticated bootstrap), the check is skipped — to be
+     * tightened once a real login flow exists.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function enforceCsrf(): void
+    {
+        if ($this->getEffectivePolicy()['csrf'] !== true) {
+            return;
+        }
+        if ($this->httpMethod === HttpMethod::Get) {
+            return;
+        }
+        $expected = (string)(core()->session->get('csrf_token') ?? '');
+        if ($expected === '') {
+            return;
+        }
+        $provided = $this->readCsrfToken();
+        if (!hash_equals($expected, $provided)) {
+            throw new CoreSecurityException(
+                'CSRF token missing or invalid.',
+                403,
+                'CSRF_FAILED'
+            );
+        }
+    }
+
+    /**
+     * Read the CSRF token from `X-CSRF-Token` header first, then `_csrf`
+     * request field as a fallback.
+     */
+    protected function readCsrfToken(): string
+    {
+        if (function_exists('getallheaders')) {
+            foreach (getallheaders() as $name => $value) {
+                if (strcasecmp((string)$name, 'X-CSRF-Token') === 0) {
+                    return (string)$value;
+                }
+            }
+        } elseif (isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+            return (string)$_SERVER['HTTP_X_CSRF_TOKEN'];
+        }
+        return (string)($_REQUEST['_csrf'] ?? '');
+    }
+
+    /**
+     * Append a structured audit entry for this call. Best-effort: never
+     * throws — audit failures must not break the response.
+     *
+     * Override to ship to an external sink (DB table, log shipper, etc.).
+     *
+     * @param mixed $result Result returned by `process()` or a synthetic
+     *                      payload such as `['status' => 'CSRF_FAILED']`.
+     */
+    protected function auditCall($result): void
+    {
+        if (($this->getEffectivePolicy()['audit'] ?? true) !== true) {
+            return;
+        }
+        if ($this->httpMethod === null || $this->securityLevel === SecurityLevel::Undefined) {
+            return;
+        }
+        try {
+            $status = is_array($result) && isset($result['status'])
+                ? (string)$result['status']
+                : 'UNKNOWN';
+            $userId = '';
+            if (core()->session->has('user')) {
+                $stored = core()->session->get('user');
+                if (is_array($stored) && isset($stored['id'])) {
+                    $userId = (string)$stored['id'];
+                }
+            }
+            error_log(sprintf(
+                '[audit] service=%s method=%s level=%s status=%s user=%s resource=%s op=%s',
+                static::class,
+                $this->httpMethod->value,
+                $this->securityLevel->value,
+                $status,
+                $userId,
+                (string)($this->security['resource'] ?? ''),
+                (string)($this->security['operation'] ?? '')
+            ));
+        } catch (\Throwable $ignore) {
+            // audit must never break the request
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Validation (existing behaviour)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Validate request parameters against `$paramSpecs`.
+     *
+     * @return array Validated parameters.
+     * @throws \Exception When validation fails.
      */
     protected function validate()
     {
         if (is_array($this->paramSpecs)) {
             $params = [];
-            // Process each parameter specification
             foreach ($this->paramSpecs as $spec) {
-                // Extract parameter value from the specified source
                 $value = $this->getParamFromSpec($spec);
-                // Validate the value using the core ParamValidator service
                 $params[$spec['name']] = core()->paramValidator->validate($value, $spec);
             }
             return $params;
         }
-        throw new \Exception("No paramSpecs defined and validate() not overridden.");
+        throw new \Exception('No paramSpecs defined and validate() not overridden.');
     }
 
     /**
-     * Abstract method that must be implemented by child classes
-     * Contains the main business logic for the REST service
-     * 
-     * @return mixed Service response data
+     * Extract a single parameter value from the configured source.
+     *
+     * @param array $spec
+     * @return mixed
      */
-    abstract protected function process();
+    protected function getParamFromSpec($spec)
+    {
+        $source = $spec['source'] ?? 'request';
+        $name = $spec['name'];
+
+        switch ($source) {
+            case 'path':
+                $idx = isset($spec['index']) ? (int)$spec['index'] : 0;
+                return $this->routeArgs[$idx] ?? ($spec['default'] ?? null);
+
+            case 'get':
+                return $_GET[$name] ?? ($spec['default'] ?? null);
+
+            case 'post':
+                return $_POST[$name] ?? ($spec['default'] ?? null);
+
+            case 'json':
+                $json = $this->getJsonBody();
+                $path = $spec['json_path'] ?? $name;
+                return $this->getValueFromJsonPath($json, $path) ?? ($spec['default'] ?? null);
+
+            case 'request':
+            default:
+                return $_REQUEST[$name] ?? ($spec['default'] ?? null);
+        }
+    }
 
     /**
-     * Get JSON body from the request
-     * 
-     * Uses static caching to avoid reading php://input multiple times
-     * since it can only be read once per request
-     * 
-     * @return array|null Parsed JSON data or null if invalid
+     * Read JSON body once per request.
+     *
+     * @return array|null
      */
     protected function getJsonBody()
     {
@@ -164,140 +639,94 @@ abstract class RestService
         if ($jsonCache !== null) {
             return $jsonCache;
         }
-        // Read raw input from the request body
         $input = file_get_contents('php://input');
-        // Parse JSON data
         $data = json_decode($input, true);
-        // Cache the result (null if invalid JSON)
         $jsonCache = is_array($data) ? $data : null;
         return $jsonCache;
     }
 
     /**
-     * Send JSON response and terminate execution
-     * 
-     * IMPORTANT: The $status parameter here is a FUNCTIONAL status code
-     * (e.g., 'SUCCESS', 'TEAM_EXISTS', 'USER_NOT_FOUND'), NOT an HTTP status code.
-     * The HTTP status is always 200 for successful requests, regardless of the
-     * functional status. This allows the client to handle business logic errors
-     * in a specific and functional way.
-     * 
-     * @param mixed $data Data to encode as JSON
-     * @param string $status Functional status code (e.g., 'SUCCESS', 'TEAM_EXISTS')
+     * Resolve a dot-notation path inside a JSON-decoded array.
+     *
+     * @param array|null $json
+     * @param string     $path
+     * @return mixed|null
+     */
+    protected function getValueFromJsonPath($json, $path)
+    {
+        if (!$json || !$path) {
+            return null;
+        }
+        $value = $json;
+        foreach (explode('.', $path) as $part) {
+            if (is_array($value) && array_key_exists($part, $value)) {
+                $value = $value[$part];
+            } else {
+                return null;
+            }
+        }
+        return $value;
+    }
+
+    // ---------------------------------------------------------------------
+    // Response helpers
+    // ---------------------------------------------------------------------
+
+    /**
+     * Send a successful JSON payload (HTTP 200, functional status in body).
+     *
+     * @param mixed  $data
+     * @param string $status Functional status (e.g. SUCCESS).
      */
     protected function sendJson($data, $status = 'SUCCESS')
     {
-        // Clear any previously buffered output to avoid leading whitespace
         if (ob_get_level()) {
             while (ob_get_level()) { ob_end_clean(); }
         }
-
-        // Always return HTTP 200 for successful requests
-        // The functional status is handled by the client
         http_response_code(200);
         header('Content-Type: application/json');
-        
-        // Send the standardized response format
-        // Note: Only 'data' and 'status' keys are allowed. Never include UI messages!
         echo json_encode([
-            'data' => $data,
-            'status' => $status
+            'data'   => $data,
+            'status' => $status,
         ]);
         exit;
     }
 
     /**
-     * Create an error response array
-     * 
-     * Returns a standardized error response format that can be
-     * processed by the router or sent directly to the client
-     * 
-     * @param string $message Error message
-     * @param int $status HTTP status code (default: 400)
-     * @return array Error response array
+     * Send a security-related error response.
+     * Body keeps a terse functional status; details live in the server logs.
+     */
+    protected function sendSecurityError(CoreSecurityException $e): void
+    {
+        if (ob_get_level()) {
+            while (ob_get_level()) { ob_end_clean(); }
+        }
+        http_response_code($e->getHttpStatus());
+        header('Content-Type: application/json');
+        error_log('[CoreSecurityException] ' . static::class . ': ' . $e->getMessage());
+        $this->auditCall(['status' => $e->getFunctionalStatus()]);
+        echo json_encode([
+            'data'   => null,
+            'status' => $e->getFunctionalStatus(),
+            'error'  => true,
+        ]);
+        exit;
+    }
+
+    /**
+     * Build a generic error response (validation failure, unhandled exception).
+     *
+     * @param string $message
+     * @param int    $status HTTP status code.
+     * @return array
      */
     protected function errorResponse($message, $status = 400)
     {
         http_response_code($status);
         return [
-            'error' => true,
+            'error'   => true,
             'message' => $message,
-            'status' => $status
+            'status'  => $status,
         ];
-    }
-
-    /**
-     * Extract parameter value from the specified source
-     * 
-     * Supports multiple parameter sources:
-     * - 'get': $_GET superglobal
-     * - 'post': $_POST superglobal  
-     * - 'json': JSON request body (supports dot notation paths)
-     * - 'request': $_REQUEST superglobal (default)
-     * 
-     * @param array $spec Parameter specification
-     * @return mixed Parameter value or default value
-     */
-    protected function getParamFromSpec($spec)
-    {
-        $source = $spec['source'] ?? 'request';
-        $name = $spec['name'];
-        
-        switch ($source) {
-            case 'path':
-                // Extract from router-captured path params by position
-                // Optionally support 'index' in spec (default 0)
-                $idx = isset($spec['index']) ? (int)$spec['index'] : 0;
-                return isset($this->routeArgs[$idx]) ? $this->routeArgs[$idx] : ($spec['default'] ?? null);
-            case 'get':
-                // Extract from GET parameters
-                return isset($_GET[$name]) ? $_GET[$name] : ($spec['default'] ?? null);
-                
-            case 'post':
-                // Extract from POST parameters
-                return isset($_POST[$name]) ? $_POST[$name] : ($spec['default'] ?? null);
-                
-            case 'json':
-                // Extract from JSON request body
-                $json = $this->getJsonBody();
-                $path = $spec['json_path'] ?? $name; // Support dot notation paths
-                return $this->getValueFromJsonPath($json, $path) ?? ($spec['default'] ?? null);
-                
-            case 'request':
-            default:
-                // Extract from REQUEST superglobal (GET + POST + COOKIE)
-                return isset($_REQUEST[$name]) ? $_REQUEST[$name] : ($spec['default'] ?? null);
-        }
-    }
-
-    /**
-     * Extract value from JSON data using dot notation path
-     * 
-     * Supports nested object access using dot notation:
-     * - 'user.name' accesses $json['user']['name']
-     * - 'data.items.0' accesses $json['data']['items'][0]
-     * 
-     * @param array|null $json JSON data array
-     * @param string $path Dot notation path (e.g., 'user.profile.name')
-     * @return mixed Value at the specified path or null if not found
-     */
-    protected function getValueFromJsonPath($json, $path)
-    {
-        if (!$json || !$path) return null;
-        
-        // Split the path into individual keys
-        $parts = explode('.', $path);
-        $value = $json;
-        
-        // Navigate through the nested structure
-        foreach ($parts as $part) {
-            if (is_array($value) && array_key_exists($part, $value)) {
-                $value = $value[$part];
-            } else {
-                // Path not found, return null
-                return null;
-            }
-        }
-        return $value;
     }
 }

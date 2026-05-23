@@ -1,19 +1,34 @@
 <?php
 namespace Core\Rest\Lang;
 
+use Core\Base\HttpMethod;
 use Core\Base\RestService;
+use Core\Base\SecurityLevel;
 
 /**
  * Class LangSetService
  *
- * REST service for setting the current language.
- * Handles only language setting (POST) operations.
- * 
- * Endpoint:
- * - POST /api/lang/set - Set current language for the session
+ * REST service for setting the current language for the session.
+ *
+ * Endpoint: POST /api/lang/set
+ * Public — anonymous visitors may pick their language before signing up.
  */
 class LangSetService extends RestService
 {
+    protected SecurityLevel $securityLevel = SecurityLevel::Public;
+
+    protected ?HttpMethod $httpMethod = HttpMethod::Post;
+
+    /** @var array<string, mixed> */
+    protected array $security = [
+        'auth'             => false,
+        'public'           => true,
+        'resource'         => 'lang',
+        'resourceIdParam'  => null,
+        'operation'        => 'set_session_lang',
+        'visibilityAware'  => false,
+    ];
+
     /**
      * Parameter specifications for this service.
      * @var array
@@ -33,7 +48,7 @@ class LangSetService extends RestService
      * 
      * @return array Response with new language
      */
-    protected function process($id = null)
+    protected function process()
     {
         $lang = $this->params['lang'];
 

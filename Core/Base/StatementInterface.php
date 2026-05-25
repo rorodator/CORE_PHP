@@ -44,6 +44,3 @@ interface StatementInterface
      */
     public function rowCount();
 }
-
-?>
-

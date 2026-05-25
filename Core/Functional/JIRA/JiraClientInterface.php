@@ -24,6 +24,3 @@ interface JiraClientInterface
      */
     public function getIssue(string $key);
 }
-
-?>
-

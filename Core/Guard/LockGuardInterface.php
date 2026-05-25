@@ -31,7 +31,3 @@ interface LockGuardInterface
      */
     public function isLocked(string $name): bool;
 }
-
-?>
-
-

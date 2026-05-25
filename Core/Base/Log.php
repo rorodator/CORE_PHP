@@ -46,6 +46,3 @@ class Log {
         return ($path[0] === '/' || preg_match('/^[A-Za-z]:\\\\/', $path) === 1);
     }
 }
-?>
-
-

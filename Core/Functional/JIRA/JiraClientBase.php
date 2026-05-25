@@ -91,6 +91,3 @@ abstract class JiraClientBase implements JiraClientInterface
         return $data;
     }
 }
-
-?>
-

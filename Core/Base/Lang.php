@@ -253,4 +253,3 @@ class Lang {
         return $this->currentLang;
     }
 }
-?>

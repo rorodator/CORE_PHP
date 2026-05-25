@@ -117,7 +117,3 @@ class ConnectedUser
      */
     public static function fromArray(array $data) { return new static($data); }
 }
-?>
-
-
-

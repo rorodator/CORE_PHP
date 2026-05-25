@@ -23,6 +23,3 @@ class JiraClientV2 extends JiraClientBase
         return $this->httpGet('/rest/api/2/issue/' . rawurlencode($key));
     }
 }
-
-?>
-

@@ -147,6 +147,3 @@ class PDO implements DBInterface
         return [$dsn, $user, $pass];
     }
 }
-
-?>
-

@@ -95,6 +95,3 @@ interface DBInterface
      */
     public function prepare($sql);
 }
-
-?>
-

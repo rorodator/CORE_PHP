@@ -96,4 +96,3 @@ class LangGetService extends RestService
         }
     }
 }
-?>

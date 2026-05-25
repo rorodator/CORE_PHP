@@ -186,7 +186,3 @@ class FileLockGuard implements LockGuardInterface
         return rtrim($this->locksDir, '/\\') . DIRECTORY_SEPARATOR . $safe . '.lock';
     }
 }
-
-?>
-
-

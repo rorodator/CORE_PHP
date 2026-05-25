@@ -196,6 +196,3 @@ class PDOAdapter implements DBInterface
         core()->log->error("DB {$action} failed: " . $e->getMessage() . " SQL=" . $sql . " PARAMS=" . $safeParams);
     }
 }
-
-?>
-

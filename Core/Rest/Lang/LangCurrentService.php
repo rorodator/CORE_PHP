@@ -78,4 +78,3 @@ class LangCurrentService extends RestService
         }
     }
 }
-?>

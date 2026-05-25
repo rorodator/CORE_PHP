@@ -31,4 +31,3 @@ interface IOInterface
      */
     public function getConfig(): array;
 }
-?>

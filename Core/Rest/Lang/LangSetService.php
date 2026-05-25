@@ -87,4 +87,3 @@ class LangSetService extends RestService
         }
     }
 }
-?>

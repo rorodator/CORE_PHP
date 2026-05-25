@@ -15,6 +15,7 @@ CORE_PHP fournit toutes les ressources génériques et réutilisables pour la pa
 - **Sessions** : Gestion des sessions utilisateur
 - **Validation** : Validation des paramètres
 - **Intégrations** : Clients JIRA et autres services externes
+- **Mail** : interface `MailerInterface`, message builder, drivers null / PHP native
 - **REST Services** : Base pour les services REST
 
 ## Installation
@@ -40,9 +41,67 @@ class MonService extends RestService {
 }
 ```
 
+## Mail (`core()->mailer`)
+
+Abstraction d’envoi d’emails, swappable par configuration INI.
+
+### Configuration
+
+```ini
+[services]
+mailer = Core\Mail\Mailer
+
+[mail]
+driver = null          ; null (dev) | php (mail() + MIME)
+from_address = "noreply@example.com"
+from_name = "My App"
+reply_to = "support@example.com"
+reply_to_name = "Support"
+message_id_host = "example.com"
+```
+
+| Driver | Classe | Usage |
+|--------|--------|-------|
+| `null` (défaut) | `NullMailer` | Log uniquement — safe en dev |
+| `php` | `PhpNativeMailer` | `mail()` + MIME multipart (text, HTML, pièces jointes) |
+
+Pour un provider tiers (SendGrid, SES, Mailgun, Postmark, Resend…), implémenter `MailerInterface` dans l’app et l’enregistrer dans `[services] mailer` — **sans dépendance vendor dans CORE_PHP**.
+
+### Exemple
+
+```php
+use Core\Mail\MailAttachment;
+use Core\Mail\MailMessage;
+
+$message = MailMessage::create()
+    ->to('user@example.com', 'Jane Doe')
+    ->subject('Bienvenue')
+    ->html('<p>Bienvenue sur <strong>MyJourney</strong>.</p>')
+    ->text('Bienvenue sur MyJourney.')
+    ->attachFile('/path/to/guide.pdf', 'guide.pdf')
+    ->replyTo('support@example.com');
+
+$result = core()->mailer->send($message);
+
+if (!$result->success) {
+    core()->log->error('Mail failed: ' . $result->error);
+}
+```
+
+### API
+
+| Type | Rôle |
+|------|------|
+| `MailerInterface` | Contrat : `isConfigured()`, `send(MailMessage)` |
+| `MailMessage` | Builder fluide (to/cc/bcc, text, html, headers, attachments) |
+| `MailAddress` | Email + nom affiché |
+| `MailAttachment` | Fichier ou contenu inline (`fromPath`, `fromString`) |
+| `MailSendResult` | `success`, `messageId`, `error` |
+
 ## Structure
 
 - `Core/Base/` : Classes de base (Core, DB, Router, etc.)
+- `Core/Mail/` : Abstraction mail (interface, DTOs, drivers)
 - `Core/Functional/` : Fonctionnalités spécifiques (JIRA, etc.)
 
 ## Développement

@@ -53,6 +53,3 @@ class PDOStatementAdapter implements StatementInterface
         return $this->statement->rowCount();
     }
 }
-
-?>
-

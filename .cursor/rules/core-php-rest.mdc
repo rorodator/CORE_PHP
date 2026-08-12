@@ -1,0 +1,26 @@
+---
+description: CORE_PHP RestService contract — security, paramSpecs, process(), policy
+globs: CORE_PHP/**/*.php
+alwaysApply: false
+---
+
+# CORE_PHP — REST services
+
+Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-services.md` for examples.
+
+## Mandatory contract
+
+- **`process()` takes no argument.** Read inputs from `$this->params` only — never `process($id)`, `$_GET`, `$_POST`, `$_REQUEST` in `process()`.
+- **Declarations on every concrete service:** `$securityLevel`, `$httpMethod`, `$security` (`auth`, `public`, `resource`, `resourceIdParam`, `operation`, `visibilityAware`).
+- **`$paramSpecs`:** types `int|string|bool`; `source` ∈ `json|get|post|path|request`; validation (`minLength`, `maxLength`, `regex`).
+- **Optional `$policy`:** `csrf`, `rateLimit`, `audit` — unknown keys refused at boot.
+- **Resource checks:** override `checkOwnership()` / `checkSharedAccess()` / `checkAiAccess()` — defaults **deny**.
+- **Cross-cutting hooks:** `enforceRateLimit()`, `enforceCsrf()`, `auditCall()`.
+- **Responses:** functional `status` in JSON body (`SUCCESS`, …) — no exceptions for normal flows; HTTP 200 on success paths.
+- **IDs:** internal SQL IDs in PHP/IO; external UID only at API boundaries.
+
+## Lifecycle (`handle()`)
+
+Declarations → HTTP method → rate limit → CSRF → param validation → security level → `process()` → audit → response.
+
+Details and examples: `CORE_PHP/ai-instructions/rest-services.md`, source `Core/Base/RestService.php`.

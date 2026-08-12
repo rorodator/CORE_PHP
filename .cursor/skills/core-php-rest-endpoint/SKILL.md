@@ -19,6 +19,7 @@ Read `.cursor/rules/core-php-rest.mdc`, `ai-instructions/rest-services.md`, `ai-
    - `process()` with **no arguments** — read `$this->params` only
    - Return functional `status` — no exceptions for normal flows
    - Resource checks: `checkOwnership()` / `checkSharedAccess()` / default deny
+   - **Authorization:** every endpoint enforces caller rights — see “Authorization — mandatory on every endpoint” in `.cursor/rules/core-php-rest.mdc`
 2. **App only (outside this repo):** register `api/entity/action` in the app Router; add/update IO + migration if persistence needed.
 
 ## Anti-patterns

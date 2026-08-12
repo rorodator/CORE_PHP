@@ -19,6 +19,25 @@ Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-s
 - **Responses:** functional `status` in JSON body (`SUCCESS`, …) — no exceptions for normal flows; HTTP 200 on success paths.
 - **IDs:** internal SQL IDs in PHP/IO; external UID only at API boundaries.
 
+## Authorization — mandatory on every endpoint
+
+**No endpoint may assume the caller is allowed.** Declarations (`$securityLevel`, `$security`) are necessary but not sufficient — enforce rights in hooks and/or `process()` before returning or mutating data.
+
+| `$securityLevel` | Minimum enforcement |
+|------------------|---------------------|
+| **Public** | Still validate params; if the resource is user-owned or visibility-gated, apply rules in `process()` (e.g. public **or** owner). Never return private content to anonymous or non-owner callers. |
+| **Authenticated** | Session required; scope reads/writes to the authenticated user in IO (`WHERE user_id = :user_id`). |
+| **Owner** | `$security['resourceIdParam']` set; override `checkOwnership()` — do not rely on default deny without implementing the check. IO updates/deletes must include ownership in the SQL `WHERE` clause. |
+| **Shared** / **Admin** / **Ai** | Override the matching hook; default is deny. |
+
+**Deny-by-default patterns:**
+
+- Unauthorized or non-owner access to private content → `NOT_FOUND` (no existence leak), not a detailed error.
+- Wrong owner on mutation → `NOT_OWNER` / framework authorization status — never apply the change.
+- **`visibilityAware: true`** on read endpoints that may serve public content — enforce visibility in `process()` after load, not only via `$securityLevel`.
+
+**Forbidden:** trusting client flags (`canEdit`, role hints, hidden UI) as authorization; skipping IO ownership clauses because the route “looks” authenticated; returning another user's row because the public id was guessed.
+
 ## Lifecycle (`handle()`)
 
 Declarations → HTTP method → rate limit → CSRF → param validation → security level → `process()` → audit → response.

@@ -75,6 +75,35 @@ protected $paramSpecs = [
 
 Use `$this->params['title']` in `process()`.
 
+Supported types are `email`, `int`, `float`, `string`, `bool`, and `array`.
+Set `strict => true` when the native JSON type must match instead of accepting
+the normal request coercion (for example, reject `"12"` when `int` is required).
+For arrays:
+
+- `minItems` / `maxItems` constrain the number of elements;
+- `list => true` rejects associative arrays;
+- `uniqueItems => true` rejects duplicates after item normalization;
+- `items` accepts a recursive parameter specification and validates each element.
+
+```php
+[
+    'name'        => 'ids',
+    'type'        => 'array',
+    'list'        => true,
+    'uniqueItems' => true,
+    'items'       => [
+        'type'      => 'string',
+        'strict'    => true,
+        'minLength' => 26,
+        'maxLength' => 26,
+    ],
+    'source'      => 'json',
+]
+```
+
+Domain-specific validation such as resource membership and ownership still
+belongs in the concrete service.
+
 ## Examples
 
 ### Public GET ping

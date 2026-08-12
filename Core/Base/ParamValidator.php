@@ -20,6 +20,7 @@ class ParamValidator
         'float'  => 'validateFloat',
         'string' => 'validateString',
         'bool'   => 'validateBool',
+        'array'  => 'validateArray',
     ];
 
     /**
@@ -52,6 +53,9 @@ class ParamValidator
         }
 
         $type = $spec['type'] ?? 'string';
+        if (!empty($spec['strict']) && !$this->matchesStrictType($value, $type)) {
+            throw new \Exception("Invalid strict {$type} for parameter: {$spec['name']}");
+        }
         $validator = $this->typeValidators[$type] ?? null;
         if ($validator && method_exists($this, $validator)) {
             $value = $this->$validator($value, $spec);
@@ -69,6 +73,31 @@ class ParamValidator
             throw new \Exception("Value for {$spec['name']} does not match pattern");
         }
         return $value;
+    }
+
+    /**
+     * Check the native PHP type produced by the request decoder.
+     *
+     * @param mixed $value The value to inspect
+     * @param string $type The declared validator type
+     * @return bool
+     */
+    protected function matchesStrictType($value, $type) {
+        switch ($type) {
+            case 'email':
+            case 'string':
+                return is_string($value);
+            case 'int':
+                return is_int($value);
+            case 'float':
+                return is_float($value);
+            case 'bool':
+                return is_bool($value);
+            case 'array':
+                return is_array($value);
+            default:
+                return true;
+        }
     }
 
     /**
@@ -133,6 +162,59 @@ class ParamValidator
             throw new \Exception("Invalid boolean for parameter: {$spec['name']}");
         }
         return $filtered;
+    }
+
+    /**
+     * Validate an array value, its shape, and optional item schema.
+     *
+     * @param mixed $value The value to validate
+     * @param array $spec The validation specification
+     * @return array The validated array
+     * @throws \Exception If value or one of its items violates the specification
+     */
+    protected function validateArray($value, $spec) {
+        if (!is_array($value)) {
+            throw new \Exception("Invalid array for parameter: {$spec['name']}");
+        }
+        if (!empty($spec['list']) && !array_is_list($value)) {
+            throw new \Exception("Array for {$spec['name']} must be a list");
+        }
+        if (isset($spec['minItems']) && count($value) < $spec['minItems']) {
+            throw new \Exception("Array for {$spec['name']} has fewer than {$spec['minItems']} items");
+        }
+        if (isset($spec['maxItems']) && count($value) > $spec['maxItems']) {
+            throw new \Exception("Array for {$spec['name']} has more than {$spec['maxItems']} items");
+        }
+
+        $validated = $value;
+        if (isset($spec['items'])) {
+            if (!is_array($spec['items'])) {
+                throw new \Exception("Invalid item specification for parameter: {$spec['name']}");
+            }
+
+            $validated = [];
+            foreach ($value as $key => $item) {
+                $itemSpec = $spec['items'];
+                $itemSpec['name'] = "{$spec['name']}[{$key}]";
+                if (!array_key_exists('required', $itemSpec)) {
+                    $itemSpec['required'] = true;
+                }
+                $validated[$key] = $this->validate($item, $itemSpec);
+            }
+        }
+
+        if (!empty($spec['uniqueItems'])) {
+            $seen = [];
+            foreach ($validated as $item) {
+                $fingerprint = serialize($item);
+                if (isset($seen[$fingerprint])) {
+                    throw new \Exception("Array for {$spec['name']} contains duplicate items");
+                }
+                $seen[$fingerprint] = true;
+            }
+        }
+
+        return $validated;
     }
 
     /**

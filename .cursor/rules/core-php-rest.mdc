@@ -12,7 +12,7 @@ Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-s
 
 - **`process()` takes no argument.** Read inputs from `$this->params` only — never `process($id)`, `$_GET`, `$_POST`, `$_REQUEST` in `process()`.
 - **Declarations on every concrete service:** `$securityLevel`, `$httpMethod`, `$security` (`auth`, `public`, `resource`, `resourceIdParam`, `operation`, `visibilityAware`).
-- **`$paramSpecs`:** types `int|string|bool`; `source` ∈ `json|get|post|path|request`; validation (`minLength`, `maxLength`, `regex`).
+- **`$paramSpecs`:** types `email|int|float|string|bool|array`; `source` ∈ `json|get|post|path|request`; validation (`strict`, `minLength`, `maxLength`, `minItems`, `maxItems`, `regex`). Arrays may declare `list`, `uniqueItems`, and a recursive `items` spec; keep domain membership/ownership checks in the concrete service.
 - **Optional `$policy`:** `csrf`, `rateLimit`, `audit` — unknown keys refused at boot.
 - **Resource checks:** override `checkOwnership()` / `checkSharedAccess()` / `checkAiAccess()` — defaults **deny**.
 - **Cross-cutting hooks:** `enforceRateLimit()`, `enforceCsrf()`, `auditCall()`.

@@ -1,6 +1,6 @@
 ---
 description: CORE_PHP RestService contract — security, paramSpecs, process(), policy
-globs: CORE_PHP/**/*.php
+globs: **/*.php
 alwaysApply: false
 ---
 
@@ -23,4 +23,4 @@ Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-s
 
 Declarations → HTTP method → rate limit → CSRF → param validation → security level → `process()` → audit → response.
 
-Details and examples: `CORE_PHP/ai-instructions/rest-services.md`, source `Core/Base/RestService.php`.
+Details and examples: `ai-instructions/rest-services.md`, source `Core/Base/RestService.php`.

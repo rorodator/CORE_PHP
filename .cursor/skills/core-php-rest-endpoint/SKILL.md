@@ -12,7 +12,7 @@ Read `.cursor/rules/core-php-rest.mdc`, `ai-instructions/rest-services.md`, `ai-
 ## Steps
 
 1. **RestService class**
-   - **Platform endpoint:** `CORE_PHP/Core/Rest/`
+   - **Platform endpoint:** `Core/Rest/`
    - **Domain endpoint:** consuming app tree (e.g. `PHP/App/Rest/`) — outside this repo
    - `$securityLevel`, `$httpMethod`, `$security`, optional `$policy`
    - `$paramSpecs` with types, sources, validation

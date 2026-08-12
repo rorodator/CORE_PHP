@@ -27,7 +27,7 @@ When you change the **RestService contract** or PHP platform patterns:
 
 ## Dual context
 
-All paths in CORE_PHP docs are **relative to this repository root**. They work standalone or symlinked (`CORE_PHP/` in an app workspace).
+All paths in CORE_PHP docs are **relative to this repository root**. Rules use **repo-relative globs** (`**/*.php`).
 
 CORE docs must **never require** an app file. App Router/IO steps are described generically in [rest-services.md](./rest-services.md#app-integration-not-core_php).
 

@@ -2,7 +2,7 @@
 
 Platform PHP layer — REST framework, `core()`, PDO, session, validation.
 
-**Cursor rule:** `.cursor/rules/core-php-rest.mdc`, `.cursor/rules/encapsulation.mdc` (scoped to `CORE_PHP/**/*.php`).  
+**Cursor rule:** `.cursor/rules/core-php-rest.mdc`, `.cursor/rules/encapsulation.mdc` (globs: `**/*.php`).
 **Workflow skill:** `.cursor/skills/core-php-rest-endpoint/SKILL.md`.
 
 | File | Topic |

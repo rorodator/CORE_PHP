@@ -138,4 +138,10 @@ public function process() {
 
 ## App integration (not CORE_PHP)
 
-Each consuming app registers routes in its own Router (e.g. MyJourney: `PHP/App/Core/Router.php`), paths like `api/entity/action`. IO classes and migrations live in the app repo.
+Each **consuming app**:
+
+- registers routes in its own Router (paths like `api/entity/action`);
+- implements domain RestService classes under its app tree (e.g. `PHP/App/Rest/`);
+- owns IO classes and migrations.
+
+This repo defines the **framework contract** only — not app routes or domain SQL.

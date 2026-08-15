@@ -36,6 +36,30 @@ class FileStorage extends AbstractStorage
     /**
      * @inheritDoc
      */
+    public function putStream(string $key, $stream): void
+    {
+        if (!is_resource($stream)) {
+            throw new StorageException('Storage stream must be a readable resource.');
+        }
+
+        $path = $this->absolutePathForKey($key);
+        $this->ensureDirectory(dirname($path));
+        $destination = @fopen($path, 'wb');
+        if ($destination === false) {
+            throw new StorageException('Unable to write storage object.');
+        }
+
+        $copied = @stream_copy_to_stream($stream, $destination);
+        @fclose($destination);
+        if ($copied === false) {
+            @unlink($path);
+            throw new StorageException('Unable to write storage object.');
+        }
+    }
+
+    /**
+     * @inheritDoc
+     */
     public function read(string $key): string
     {
         $path = $this->absolutePathForKey($key, true);
@@ -64,11 +88,14 @@ class FileStorage extends AbstractStorage
      */
     public function delete(string $key): bool
     {
-        if (!$this->exists($key)) {
+        $path = $this->absolutePathForKey($key);
+        if (!is_file($path)) {
             return false;
         }
-        $path = $this->absolutePathForKey($key, true);
-        return @unlink($path);
+        if (!@unlink($path)) {
+            throw new StorageException('Unable to delete storage object.');
+        }
+        return true;
     }
 
     /**
@@ -76,11 +103,7 @@ class FileStorage extends AbstractStorage
      */
     public function exists(string $key): bool
     {
-        try {
-            $path = $this->absolutePathForKey($key);
-        } catch (StorageException $error) {
-            return false;
-        }
+        $path = $this->absolutePathForKey($key);
         return is_file($path);
     }
 

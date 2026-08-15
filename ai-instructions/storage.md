@@ -44,6 +44,12 @@ Future backends may ignore `root` and read provider-specific keys (`bucket`, `re
 
 ```php
 core()->storage->put('journeys/42/cover.bin', $bytes);
+$stream = fopen('php://temp', 'r+');
+fwrite($stream, $largePayload);
+rewind($stream);
+core()->storage->putStream('journeys/42/export.bin', $stream);
+fclose($stream);
+
 $bytes = core()->storage->read('journeys/42/cover.bin');
 $stream = core()->storage->openReadStream('journeys/42/cover.bin');
 fclose($stream);
@@ -60,17 +66,18 @@ Keys are opaque, relative, slash-separated identifiers:
 - valid: `journeys/42/cover.bin`, `tmp/export.csv`
 - invalid: absolute paths, empty strings, `.`, `..`, or segments containing parent references
 
-Implementations must reject invalid keys before touching the backend.
+Implementations must reject invalid keys before touching the backend. Invalid keys raise `StorageException` on every method, including `exists()` and `delete()` — never `false`.
 
 ## Contract (`StorageInterface`)
 
 | Method | Semantics |
 |--------|-----------|
-| `put($key, $contents)` | Create or replace an object |
-| `read($key)` | Return full contents; throw `StorageException` when missing |
+| `put($key, $contents)` | Create or replace a small object from an in-memory string |
+| `putStream($key, $stream)` | Create or replace a large object from a readable stream without buffering the full payload |
+| `read($key)` | Return full contents; throw `StorageException` when the key is invalid or the object is missing |
 | `openReadStream($key)` | Read-only stream for large payloads; caller closes the resource |
-| `delete($key)` | Remove when present; return `false` when already absent |
-| `exists($key)` | Whether an object is stored for the key |
+| `delete($key)` | Return `true` when an existing object was removed; return `false` only when the object is absent; throw `StorageException` when the key is invalid or backend removal fails |
+| `exists($key)` | Return whether an object is stored; throw `StorageException` when the key is invalid |
 
 Out of scope for this contract: public URLs, MIME detection, image transforms, multipart upload helpers. Add those in app-layer services that **use** storage, not inside the storage primitive.
 
@@ -80,7 +87,7 @@ Out of scope for this contract: public URLs, MIME detection, image transforms, m
 2. Read backend settings from `core()->getConfigSection('storage')` in the constructor.
 3. Map normalized keys to the provider object id without leaking provider details through the interface.
 4. Register the class under `[services] storage`.
-5. Keep parity tests against the same key scenarios (`put`, `read`, stream, `delete`, `exists`, invalid keys).
+5. Keep parity tests against the same key scenarios (`put`, `putStream`, `read`, stream read, `delete`, `exists`, invalid keys, delete failure).
 
 ## Tests
 

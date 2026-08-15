@@ -25,6 +25,18 @@ interface StorageInterface
     public function put(string $key, string $contents): void;
 
     /**
+     * Persist binary contents from a readable stream under a storage key.
+     *
+     * Overwrites an existing object with the same key. Implementations should
+     * stream bytes to the backend without buffering the full payload in memory.
+     *
+     * @param string $key Opaque relative key.
+     * @param resource $stream Readable stream resource.
+     * @throws StorageException When the key is invalid or the object cannot be written.
+     */
+    public function putStream(string $key, $stream): void;
+
+    /**
      * Read the full object contents.
      *
      * @param string $key Opaque relative key.
@@ -48,7 +60,8 @@ interface StorageInterface
      * Remove an object when present.
      *
      * @param string $key Opaque relative key.
-     * @return bool True when an object existed and was removed, false when absent.
+     * @return bool True when an object existed and was removed.
+     * @throws StorageException When the key is invalid or removal fails for an existing object.
      */
     public function delete(string $key): bool;
 
@@ -56,6 +69,7 @@ interface StorageInterface
      * Whether an object exists for the given key.
      *
      * @param string $key Opaque relative key.
+     * @throws StorageException When the key is invalid.
      */
     public function exists(string $key): bool;
 }

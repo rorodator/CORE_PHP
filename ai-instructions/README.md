@@ -10,6 +10,7 @@ Platform PHP layer — REST framework, `core()`, PDO, session, validation.
 | [encapsulation.md](./encapsulation.md) | Repo boundaries, dual context |
 | [layering.md](./layering.md) | Stack placement (standalone-safe) |
 | [rest-services.md](./rest-services.md) | RestService contract, security, policy, paramSpecs, examples |
+| [storage.md](./storage.md) | Opaque object storage (`core()->storage`) |
 
 Consuming apps extend RestService in their own app REST tree and register routes in their app Router — see the app's thin bridge rule, not duplicated here.
 

@@ -259,6 +259,11 @@ class Router
      */
     protected function routeApi($page)
     {
+        if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) === 'OPTIONS') {
+            $this->respondApiOptions($page);
+            return;
+        }
+
         foreach ($this->routes as $pattern => $serviceClass) {
             if (preg_match($pattern, $page, $matches)) {
                 array_shift($matches);
@@ -279,6 +284,77 @@ class Router
         }
         http_response_code(404);
         echo json_encode(['error' => true, 'message' => "No API route matched for: $page"]);
+    }
+
+    /**
+     * Answer CORS preflight probes without dispatching a RestService.
+     *
+     * Browsers may send OPTIONS before cross-origin POST requests that carry
+     * non-simple headers (for example X-Requested-With). RestService only
+     * accepts declared verbs, so OPTIONS must be handled here.
+     *
+     * @param string $page Sanitized API path (without leading slash).
+     * @return void
+     */
+    protected function respondApiOptions($page)
+    {
+        $allowedMethods = ['OPTIONS'];
+        foreach ($this->routes as $pattern => $serviceClass) {
+            if (!preg_match($pattern, $page)) {
+                continue;
+            }
+            if (!class_exists($serviceClass)) {
+                break;
+            }
+            $allowedMethods[] = $this->resolveServiceHttpMethod($serviceClass);
+            break;
+        }
+
+        $allowedMethods = array_values(array_unique(array_filter($allowedMethods)));
+        sort($allowedMethods);
+
+        $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
+        if ($origin !== '') {
+            header('Access-Control-Allow-Origin: ' . $origin);
+            header('Access-Control-Allow-Credentials: true');
+            header('Vary: Origin');
+            $requestedHeaders = trim((string)($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] ?? ''));
+            if ($requestedHeaders !== '') {
+                header('Access-Control-Allow-Headers: ' . $requestedHeaders);
+            } else {
+                header('Access-Control-Allow-Headers: Content-Type, X-Requested-With, X-CSRF-Token');
+            }
+            header('Access-Control-Allow-Methods: ' . implode(', ', $allowedMethods));
+            header('Access-Control-Max-Age: 86400');
+        }
+
+        http_response_code(204);
+        header('Allow: ' . implode(', ', $allowedMethods));
+        exit;
+    }
+
+    /**
+     * @param string $serviceClass
+     * @return string Uppercase HTTP verb declared on the service, or empty when unknown.
+     */
+    protected function resolveServiceHttpMethod($serviceClass)
+    {
+        try {
+            $reflection = new \ReflectionClass($serviceClass);
+            if (!$reflection->hasProperty('httpMethod')) {
+                return '';
+            }
+            $property = $reflection->getProperty('httpMethod');
+            $property->setAccessible(true);
+            $service = $reflection->newInstanceWithoutConstructor();
+            $method = $property->getValue($service);
+            if ($method instanceof \BackedEnum) {
+                return strtoupper((string)$method->value);
+            }
+        } catch (\Throwable $ignore) {
+            return '';
+        }
+        return '';
     }
 
     /**

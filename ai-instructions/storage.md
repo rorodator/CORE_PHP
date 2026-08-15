@@ -73,7 +73,7 @@ Implementations must reject invalid keys before touching the backend. Invalid ke
 | Method | Semantics |
 |--------|-----------|
 | `put($key, $contents)` | Create or replace a small object from an in-memory string |
-| `putStream($key, $stream)` | Create or replace a large object from a readable stream without buffering the full payload |
+| `putStream($key, $stream)` | Create or replace a large object from a readable stream without buffering the full payload; implementations should write to a temporary object then atomically replace the destination |
 | `read($key)` | Return full contents; throw `StorageException` when the key is invalid or the object is missing |
 | `openReadStream($key)` | Read-only stream for large payloads; caller closes the resource |
 | `delete($key)` | Return `true` when an existing object was removed; return `false` only when the object is absent; throw `StorageException` when the key is invalid or backend removal fails |

@@ -44,7 +44,8 @@ class FileStorage extends AbstractStorage
 
         $path = $this->absolutePathForKey($key);
         $this->ensureDirectory(dirname($path));
-        $destination = @fopen($path, 'wb');
+        $temporaryPath = $path . '.tmp-' . bin2hex(random_bytes(8));
+        $destination = @fopen($temporaryPath, 'wb');
         if ($destination === false) {
             throw new StorageException('Unable to write storage object.');
         }
@@ -52,7 +53,16 @@ class FileStorage extends AbstractStorage
         $copied = @stream_copy_to_stream($stream, $destination);
         @fclose($destination);
         if ($copied === false) {
-            @unlink($path);
+            @unlink($temporaryPath);
+            throw new StorageException('Unable to write storage object.');
+        }
+
+        if (is_file($path) && !@unlink($path)) {
+            @unlink($temporaryPath);
+            throw new StorageException('Unable to write storage object.');
+        }
+        if (!@rename($temporaryPath, $path)) {
+            @unlink($temporaryPath);
             throw new StorageException('Unable to write storage object.');
         }
     }

@@ -85,6 +85,38 @@ $storage->putStream($streamKey, $source);
 fclose($source);
 assertTrue($storage->read($streamKey) === $streamPayload, 'putStream() must persist streamed bytes.');
 
+$replaceKey = 'verify/objects/replace-me.bin';
+$storage->put($replaceKey, 'before-replace');
+$replacement = fopen('php://memory', 'r+');
+fwrite($replacement, 'after-replace');
+rewind($replacement);
+$storage->putStream($replaceKey, $replacement);
+fclose($replacement);
+assertTrue(
+    $storage->read($replaceKey) === 'after-replace',
+    'putStream() must atomically replace an existing object.'
+);
+
+$keepKey = 'verify/objects/keep-on-failure.bin';
+$storage->put($keepKey, 'keep-me');
+$closed = fopen('php://memory', 'r+');
+fwrite($closed, 'partial');
+fclose($closed);
+$replaceFailed = false;
+try {
+    $storage->putStream($keepKey, $closed);
+} catch (StorageException $error) {
+    $replaceFailed = true;
+}
+assertTrue($replaceFailed, 'putStream() must reject unreadable streams.');
+assertTrue(
+    $storage->read($keepKey) === 'keep-me',
+    'putStream() must leave the previous object intact when replacement fails.'
+);
+$keepDirectory = $tempRoot . DIRECTORY_SEPARATOR . 'verify' . DIRECTORY_SEPARATOR . 'objects';
+$tempLeftovers = glob($keepDirectory . DIRECTORY_SEPARATOR . 'keep-on-failure.bin.tmp-*') ?: [];
+assertTrue($tempLeftovers === [], 'putStream() must clean temporary files after failure.');
+
 assertTrue($storage->delete($key), 'delete() must remove an existing object.');
 assertTrue(!$storage->exists($key), 'exists() must be false after delete().');
 assertTrue(!$storage->delete($key), 'delete() must return false for missing objects.');
@@ -150,6 +182,8 @@ try {
 }
 
 @unlink($tempRoot . DIRECTORY_SEPARATOR . 'verify' . DIRECTORY_SEPARATOR . 'objects' . DIRECTORY_SEPARATOR . 'streamed.bin');
+@unlink($tempRoot . DIRECTORY_SEPARATOR . 'verify' . DIRECTORY_SEPARATOR . 'objects' . DIRECTORY_SEPARATOR . 'replace-me.bin');
+@unlink($tempRoot . DIRECTORY_SEPARATOR . 'verify' . DIRECTORY_SEPARATOR . 'objects' . DIRECTORY_SEPARATOR . 'keep-on-failure.bin');
 @unlink($tempRoot . DIRECTORY_SEPARATOR . 'verify' . DIRECTORY_SEPARATOR . 'objects' . DIRECTORY_SEPARATOR . 'locked.bin');
 @rmdir($lockedDirectory);
 @rmdir($tempRoot . DIRECTORY_SEPARATOR . 'verify');

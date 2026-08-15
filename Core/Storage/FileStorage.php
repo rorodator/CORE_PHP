@@ -50,20 +50,35 @@ class FileStorage extends AbstractStorage
             throw new StorageException('Unable to write storage object.');
         }
 
-        $copied = @stream_copy_to_stream($stream, $destination);
-        @fclose($destination);
-        if ($copied === false) {
-            @unlink($temporaryPath);
-            throw new StorageException('Unable to write storage object.');
+        try {
+            $copied = @stream_copy_to_stream($stream, $destination);
+            if ($copied === false) {
+                throw new StorageException('Unable to write storage object.');
+            }
+        } finally {
+            @fclose($destination);
         }
 
-        if (is_file($path) && !@unlink($path)) {
-            @unlink($temporaryPath);
+        $committed = false;
+        try {
+            if (@rename($temporaryPath, $path)) {
+                $committed = true;
+                return;
+            }
+
+            // Fallback for platforms that cannot rename over an existing destination.
+            if (is_file($path) && !@unlink($path)) {
+                throw new StorageException('Unable to write storage object.');
+            }
+            if (@rename($temporaryPath, $path)) {
+                $committed = true;
+                return;
+            }
             throw new StorageException('Unable to write storage object.');
-        }
-        if (!@rename($temporaryPath, $path)) {
-            @unlink($temporaryPath);
-            throw new StorageException('Unable to write storage object.');
+        } finally {
+            if (!$committed && is_file($temporaryPath)) {
+                @unlink($temporaryPath);
+            }
         }
     }
 

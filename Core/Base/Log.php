@@ -23,6 +23,7 @@ class Log {
     }
 
     public function error(string $message): void { $this->write('ERROR', $message); }
+    public function warning(string $message): void { $this->write('WARNING', $message); }
     public function info(string $message): void { $this->write('INFO', $message); }
     public function debug(string $message): void { $this->write('DEBUG', $message); }
     public function io(string $message): void { $this->write('IO', $message); }
@@ -36,9 +37,9 @@ class Log {
     }
 
     private function shouldLog(string $level): bool {
-        $order = ['ERROR' => 0, 'INFO' => 1, 'DEBUG' => 2, 'IO' => 1];
-        $curr = $order[$this->level] ?? 1;
-        $lvl = $order[$level] ?? 1;
+        $order = ['ERROR' => 0, 'WARNING' => 1, 'INFO' => 2, 'DEBUG' => 3, 'IO' => 2];
+        $curr = $order[$this->level] ?? 2;
+        $lvl = $order[$level] ?? 2;
         return $lvl <= $curr || $level === 'IO';
     }
 

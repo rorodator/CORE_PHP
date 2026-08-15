@@ -314,7 +314,7 @@ class Router
         sort($allowedMethods);
 
         $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
-        if ($origin !== '') {
+        if ($origin !== '' && $this->isAllowedCorsOrigin($origin)) {
             header('Access-Control-Allow-Origin: ' . $origin);
             header('Access-Control-Allow-Credentials: true');
             header('Vary: Origin');
@@ -328,9 +328,49 @@ class Router
             header('Access-Control-Max-Age: 86400');
         }
 
+        if (ob_get_level()) {
+            while (ob_get_level()) {
+                ob_end_clean();
+            }
+        }
         http_response_code(204);
         header('Allow: ' . implode(', ', $allowedMethods));
         exit;
+    }
+
+    /**
+     * Explicit allow-list of browser Origins permitted to receive CORS headers.
+     *
+     * Default is empty (same-origin only). Configure [cors] allowed_origins in app INI.
+     *
+     * @return string[]
+     */
+    protected function getAllowedCorsOrigins(): array
+    {
+        try {
+            $config = core()->getConfigSection('cors');
+            $raw = trim((string)($config['allowed_origins'] ?? ''));
+            if ($raw === '') {
+                return [];
+            }
+            $origins = array_filter(array_map('trim', explode(',', $raw)));
+            return array_values(array_unique($origins));
+        } catch (\Throwable $ignore) {
+            return [];
+        }
+    }
+
+    /**
+     * @param string $origin
+     * @return bool
+     */
+    protected function isAllowedCorsOrigin($origin): bool
+    {
+        $origin = trim((string)$origin);
+        if ($origin === '') {
+            return false;
+        }
+        return in_array($origin, $this->getAllowedCorsOrigins(), true);
     }
 
     /**

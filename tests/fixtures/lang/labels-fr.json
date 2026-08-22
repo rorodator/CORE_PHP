@@ -1,0 +1,5 @@
+{
+  "notifications.language_changed": "Langue changée",
+  "notifications.language_switched": "Langue : {{lang}}",
+  "app.title": "Test"
+}

@@ -55,8 +55,8 @@ class PDOAdapter implements DBInterface
         try {
             $this->pdo = new PDO($this->dsn, $this->username, $this->password, $this->options);
         } catch (PDOException $e) {
-            // Log detailed error server-side, but do not leak details to UI
-            core()->log->error('DB connect failed: ' . $e->getMessage() . ' DSN=' . $this->dsn);
+            // Log safe diagnostics server-side; never expose DSN, credentials, or SQL text.
+            core()->log->error($this->formatDbFailureLog('connect', $e));
             throw new \RuntimeException('Database connection error');
         }
     }
@@ -182,7 +182,7 @@ class PDOAdapter implements DBInterface
     }
 
     /**
-     * Log SQL error details to server log.
+     * Log SQL error diagnostics without SQL text, bound values, or DSN details.
      *
      * @param string $action
      * @param string $sql
@@ -192,7 +192,87 @@ class PDOAdapter implements DBInterface
      */
     private function logSqlError($action, $sql, array $params, PDOException $e)
     {
-        $safeParams = @json_encode($params);
-        core()->log->error("DB {$action} failed: " . $e->getMessage() . " SQL=" . $sql . " PARAMS=" . $safeParams);
+        core()->log->error($this->formatDbFailureLog($action, $e));
+    }
+
+    /**
+     * Build a conservative DB failure log line (no SQL, params, DSN, or exception message).
+     *
+     * @param string $operation
+     * @param PDOException $e
+     * @return string
+     */
+    private function formatDbFailureLog($operation, PDOException $e)
+    {
+        $parts = [
+            'DB ' . $operation . ' failed',
+            'exception=' . get_class($e),
+        ];
+
+        $sqlState = $this->extractSqlState($e);
+        if ($sqlState !== '') {
+            $parts[] = 'sqlstate=' . $sqlState;
+        }
+
+        $driverCode = $this->extractDriverCode($e);
+        if ($driverCode !== null) {
+            $parts[] = 'code=' . $driverCode;
+        }
+
+        if ($operation === 'connect') {
+            $driverHint = $this->extractDsnDriverHint($this->dsn);
+            if ($driverHint !== '') {
+                $parts[] = 'driver=' . $driverHint;
+            }
+        }
+
+        return implode('; ', $parts);
+    }
+
+    /**
+     * Extract SQLSTATE from a PDOException without logging the full message.
+     *
+     * @param PDOException $e
+     * @return string
+     */
+    private function extractSqlState(PDOException $e)
+    {
+        $code = (string)$e->getCode();
+        if (preg_match('/^[A-Z0-9]{5}$/', $code) === 1) {
+            return $code;
+        }
+        if (preg_match('/SQLSTATE\[([A-Z0-9]{5})\]/', $e->getMessage(), $matches) === 1) {
+            return $matches[1];
+        }
+        return '';
+    }
+
+    /**
+     * Extract a numeric driver error code when present in the PDO message format.
+     *
+     * @param PDOException $e
+     * @return int|null
+     */
+    private function extractDriverCode(PDOException $e)
+    {
+        if (preg_match('/SQLSTATE\[[^\]]+\]:\s(?:[^:]*:\s)?(\d+)/', $e->getMessage(), $matches) === 1) {
+            return (int)$matches[1];
+        }
+        return null;
+    }
+
+    /**
+     * Return only the DSN driver prefix (e.g. mysql, sqlite) — never host/db/credentials.
+     *
+     * @param string $dsn
+     * @return string
+     */
+    private function extractDsnDriverHint($dsn)
+    {
+        $separator = strpos($dsn, ':');
+        if ($separator === false) {
+            return '';
+        }
+        return substr($dsn, 0, $separator);
     }
 }

@@ -34,9 +34,21 @@ $dbService = core('db');
 $users = $dbService->query("SELECT * FROM users");
 
 // Services REST
-class MonService extends RestService {
-    public function get() {
-        return $this->success(['data' => 'value']);
+class ExampleService extends RestService {
+    protected SecurityLevel $securityLevel = SecurityLevel::Public;
+    protected ?HttpMethod $httpMethod = HttpMethod::Get;
+
+    protected array $security = [
+        'auth' => false,
+        'public' => true,
+        'resource' => null,
+        'resourceIdParam' => null,
+        'operation' => 'read',
+        'visibilityAware' => false,
+    ];
+
+    protected function process() {
+        return ['data' => ['value' => 'ok'], 'status' => 'SUCCESS'];
     }
 }
 ```
@@ -76,8 +88,8 @@ use Core\Mail\MailMessage;
 $message = MailMessage::create()
     ->to('user@example.com', 'Jane Doe')
     ->subject('Bienvenue')
-    ->html('<p>Bienvenue sur <strong>MyJourney</strong>.</p>')
-    ->text('Bienvenue sur MyJourney.')
+    ->html('<p>Bienvenue sur <strong>My App</strong>.</p>')
+    ->text('Bienvenue sur My App.')
     ->attachFile('/path/to/guide.pdf', 'guide.pdf')
     ->replyTo('support@example.com');
 
@@ -106,8 +118,9 @@ if (!$result->success) {
 
 ## Développement
 
-Cette bibliothèque suit les règles de développement du projet MyManager :
+Conventions CORE_PHP :
+
 - Commentaires en anglais avec style PHPDoc
 - Noms de variables, classes, fonctions en anglais
-- Aucun appel direct à la base de données, sauf dans les IO
-- Tout doit être abstrait via les IO
+- Aucun appel direct à la base de données, sauf dans les IO (dans l’application consommatrice)
+- Tout accès persistance passe par les IO de l’application

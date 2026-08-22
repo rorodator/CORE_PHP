@@ -52,11 +52,44 @@ Optional `protected array $policy = []`. Defaults merged from `RestService::DEFA
 
 | Key | Type | Default | Role |
 |-----|------|---------|------|
-| `csrf`      | `bool`         | `true`       | Verify CSRF token on state-changing methods. Skipped on GET. |
-| `rateLimit` | `string\|false`| `'standard'` | Named bucket; `false` disables. |
+| `csrf`      | `bool`         | `true`       | CSRF gate on mutating methods when a session token exists. Skipped on GET and when no session token is provisioned. |
+| `rateLimit` | `string\|false`| `'standard'` | Named bucket declaration for audit/overrides; CORE does not enforce counters by default. `false` disables the hook. |
 | `audit`     | `bool`         | `true`       | Structured audit log per call. |
 
 Override hooks: `enforceRateLimit()`, `enforceCsrf()`, `auditCall($result)`.
+
+### CSRF (`policy.csrf`)
+
+When `policy.csrf === true`, CORE runs a CSRF gate on mutating HTTP methods **only
+when a `csrf_token` value already exists in the session**:
+
+- reads `X-CSRF-Token` (header), then `_csrf` (request field) as fallback;
+- compares with `hash_equals` against the session token;
+- responds `403` / `CSRF_FAILED` on mismatch.
+
+**Token provisioning and rotation belong to the consuming application** (e.g. login or
+bootstrap). When no session token is provisioned yet, the gate is skipped — that
+absence must not be documented or assumed as effective CSRF protection.
+
+### Rate limiting (`policy.rateLimit`)
+
+`policy.rateLimit` is today a **declaration and hook only**:
+
+- CORE validates the bucket name (or `false` to disable);
+- the policy is visible for audit and subclass overrides;
+- **CORE_PHP ships no counter store and no generic enforcement.**
+
+A consuming application must override `enforceRateLimit()` (or equivalent middleware)
+to apply concrete throttling. Declaring `'auth'` on a login endpoint does **not** mean
+CORE protects it — enforcement must be wired explicitly.
+
+### Security metadata (`$security`)
+
+Fields such as `resource`, `operation`, and `visibilityAware` are primarily
+**declarations, audit metadata, and declaration-coherence gates**. CORE_PHP validates
+their presence and shape; it does **not** enforce domain business policies (journey
+membership, visibility rules, ownership of arbitrary resources). Those checks belong
+in application hooks (`checkOwnership()`, `process()`, IO layer) in the consuming app.
 
 ## paramSpecs
 

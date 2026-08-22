@@ -35,7 +35,7 @@ class Lang {
 
     /**
      * Constructor
-     * Gets configuration from MyManager.ini like other Core/Base services
+     * Gets configuration from core() [lang] section like other Core/Base services.
      */
     public function __construct() {
         // Get configuration from core()

@@ -23,8 +23,8 @@ use Core\Exception\CoreSecurityException;
  * Lifecycle (`handle()`):
  *  1. Declarations are present and coherent (else 500).
  *  2. The request HTTP method matches the declared one (else 405).
- *  3. Rate-limit gate (else 429).
- *  4. CSRF gate for state-changing methods (else 403).
+ *  3. Rate-limit policy hook (429 only when a subclass enforces a bucket budget).
+ *  4. CSRF gate for state-changing methods when a session token is provisioned (else 403).
  *  5. Parameters are validated against `$paramSpecs` (else 400).
  *  6. The declared security level is enforced with `$this->params` available (else 401/403).
  *  7. `process()` runs the business logic with no direct arguments.
@@ -35,7 +35,7 @@ use Core\Exception\CoreSecurityException;
  *   ['data' => mixed, 'status' => 'SUCCESS' | 'XXX']
  *
  * The HTTP status is always 200 for normal flows; functional outcomes
- * are conveyed through the `status` string (e.g. `TEAM_EXISTS`).
+ * are conveyed through the `status` string (e.g. `VALIDATION_ERROR`).
  */
 abstract class RestService
 {
@@ -101,8 +101,11 @@ abstract class RestService
      * only keys listed in `ALLOWED_POLICY_KEYS` are accepted.
      *
      * Supported keys:
-     * - `csrf`      (bool)        — verify a CSRF token on state-changing methods. Default: true.
-     * - `rateLimit` (string|false)— named bucket (e.g. 'standard', 'auth', 'ai'); false to disable. Default: 'standard'.
+     * - `csrf`      (bool)        — when true, compare `X-CSRF-Token` (or `_csrf`) against
+     *                              `csrf_token` in session on mutating methods. Skipped when
+     *                              no session token is provisioned yet (application lifecycle).
+     * - `rateLimit` (string|false)— named bucket declaration for audit/overrides; CORE does not
+     *                              enforce counters by default. `false` disables the hook.
      * - `audit`     (bool)        — emit a structured audit log entry per call. Default: true.
      *
      * @var array<string, mixed>
@@ -451,9 +454,10 @@ abstract class RestService
     // ---------------------------------------------------------------------
 
     /**
-     * Rate-limit gate. Default implementation only validates the bucket
-     * declaration; the actual counter store is project-specific and lives
-     * in an override (e.g. Redis-backed subclass) in MyJourney.
+     * Rate-limit policy hook. Default implementation only validates the bucket
+     * declaration; CORE_PHP does not ship a counter store or generic enforcement.
+     * Consuming applications override this hook when they need concrete throttling
+     * (e.g. Redis-backed counters).
      *
      * Throw a CoreSecurityException(429, 'RATE_LIMITED') when the caller
      * exceeds the bucket budget.
@@ -479,13 +483,14 @@ abstract class RestService
     }
 
     /**
-     * CSRF gate. Active only when `policy.csrf === true` and the request
-     * uses a state-changing HTTP method.
+     * CSRF gate. Active only when `policy.csrf === true`, the request uses a
+     * state-changing HTTP method, and a `csrf_token` value exists in session.
      *
-     * Default behaviour: compare the request token against `csrf_token`
-     * stored in the session. If no token is in session yet (e.g. before
-     * the first authenticated bootstrap), the check is skipped — to be
-     * tightened once a real login flow exists.
+     * Default behaviour: read `X-CSRF-Token` (then `_csrf`), compare to the session
+     * token with `hash_equals`, respond `CSRF_FAILED` on mismatch. When no session
+     * token is provisioned yet, the check is skipped — token lifecycle belongs to
+     * the consuming application; absence of a session token is not effective CSRF
+     * protection on its own.
      *
      * @throws CoreSecurityException
      */

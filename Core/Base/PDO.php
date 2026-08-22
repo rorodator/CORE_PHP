@@ -14,8 +14,8 @@ class PDO implements DBInterface
 
     /**
      * Build a PDO-backed DB service using environment/config hints.
-     * Defaults to a local SQLite database located at PHP/DATABASE/my_manager.sqlite
-     * at the project root when DSN is not provided via environment.
+     * When no DSN is configured, builds one from the [database] section
+     * (see buildDsnFromConfig()).
      */
     public function __construct()
     {

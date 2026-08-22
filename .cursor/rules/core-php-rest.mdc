@@ -13,8 +13,8 @@ Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-s
 - **`process()` takes no argument.** Read inputs from `$this->params` only — never `process($id)`, `$_GET`, `$_POST`, `$_REQUEST` in `process()`.
 - **Declarations on every concrete service:** `$securityLevel`, `$httpMethod`, `$security` (`auth`, `public`, `resource`, `resourceIdParam`, `operation`, `visibilityAware`).
 - **`$paramSpecs`:** types `email|int|float|string|bool|array`; `source` ∈ `json|get|post|path|request`; validation (`strict`, `minLength`, `maxLength`, `minItems`, `maxItems`, `regex`). Arrays may declare `list`, `uniqueItems`, and a recursive `items` spec; keep domain membership/ownership checks in the concrete service.
-- **Optional `$policy`:** `csrf`, `rateLimit`, `audit` — unknown keys refused at boot.
-- **Resource checks:** override `checkOwnership()` / `checkSharedAccess()` / `checkAiAccess()` — defaults **deny**.
+- **Optional `$policy`:** `csrf`, `rateLimit`, `audit` — unknown keys refused at boot. See `ai-instructions/rest-services.md` for actual CSRF/rate-limit behaviour (declarations vs enforcement).
+- **Resource checks:** override `checkOwnership()` / `checkSharedAccess()` / `checkAiAccess()` — defaults **deny**. CORE validates `$security` metadata shape only; domain authorization lives in the app.
 - **Cross-cutting hooks:** `enforceRateLimit()`, `enforceCsrf()`, `auditCall()`.
 - **Responses:** functional `status` in JSON body (`SUCCESS`, …) — no exceptions for normal flows; HTTP 200 on success paths.
 - **IDs:** internal SQL IDs in PHP/IO; external UID only at API boundaries.
@@ -40,6 +40,12 @@ Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-s
 
 ## Lifecycle (`handle()`)
 
-Declarations → HTTP method → rate limit → CSRF → param validation → security level → `process()` → audit → response.
+Declarations → HTTP method → rate-limit hook → CSRF hook (when session token exists) → param validation → security level → `process()` → audit → response.
+
+**CSRF:** `policy.csrf=true` compares `X-CSRF-Token` to session `csrf_token` on mutating methods only when a session token is provisioned — token lifecycle is app-owned; no session token means no effective CSRF gate.
+
+**Rate limit:** `policy.rateLimit` is validated and audit-visible; CORE provides no counter store — apps override `enforceRateLimit()` for real throttling.
+
+**Security metadata:** `resource`, `operation`, `visibilityAware` are declarations/audit — not domain policy enforcement by CORE.
 
 Details and examples: `ai-instructions/rest-services.md`, source `Core/Base/RestService.php`.

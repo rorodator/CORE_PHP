@@ -112,7 +112,7 @@ if (!$result->success) {
 
 ## Rich-text HTML (`Core\Util\RichTextHtml`)
 
-Sanitizer serveur aligné sur le contrat CORE_UX `core-rich-text`. **Ne jamais faire confiance** à l’HTML déjà sanitizé côté navigateur — toujours appeler `RichTextHtml::sanitize()` avant persistance ou rendu. Stocker l’HTML sanitizé ; utiliser `getPlainText()` pour la validation métier (présence, longueur visible) — les limites métier restent dans l’application consommatrice.
+Sanitizer serveur aligné sur le contrat CORE_UX `core-rich-text`. **Ne jamais faire confiance** à l’HTML déjà sanitizé côté navigateur — toujours appeler `RichTextHtml::sanitize()` avant persistance ou rendu. Stocker l’HTML sanitizé ; utiliser `getPlainText()` (textContent DOM brut, sans trim CORE) pour la validation métier — les limites et normalisations (`trim()`, maxlength) restent dans l’application consommatrice.
 
 Détails : [ai-instructions/rich-text-html.md](./ai-instructions/rich-text-html.md).
 

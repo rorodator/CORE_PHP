@@ -12,6 +12,7 @@ $runners = [
     'run-persistence-contract-tests.php',
     'run-rest-contract-tests.php',
     'run-lang-contract-tests.php',
+    'run-rich-text-html-tests.php',
 ];
 
 $phpBinary = PHP_BINARY;

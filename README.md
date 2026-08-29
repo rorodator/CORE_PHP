@@ -110,11 +110,18 @@ if (!$result->success) {
 | `MailAttachment` | Fichier ou contenu inline (`fromPath`, `fromString`) |
 | `MailSendResult` | `success`, `messageId`, `error` |
 
+## Rich-text HTML (`Core\Util\RichTextHtml`)
+
+Sanitizer serveur aligné sur le contrat CORE_UX `core-rich-text`. **Ne jamais faire confiance** à l’HTML déjà sanitizé côté navigateur — toujours appeler `RichTextHtml::sanitize()` avant persistance ou rendu. Stocker l’HTML sanitizé ; utiliser `getPlainText()` pour la validation métier (présence, longueur visible) — les limites métier restent dans l’application consommatrice.
+
+Détails : [ai-instructions/rich-text-html.md](./ai-instructions/rich-text-html.md).
+
 ## Structure
 
 - `Core/Base/` : Classes de base (Core, DB, Router, etc.)
 - `Core/Mail/` : Abstraction mail (interface, DTOs, drivers)
 - `Core/Functional/` : Fonctionnalités spécifiques (JIRA, etc.)
+- `Core/Util/` : Utilitaires génériques (`RichTextHtml`, …)
 
 ## Développement
 

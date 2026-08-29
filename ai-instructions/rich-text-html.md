@@ -16,7 +16,7 @@ Recommended storage format: **sanitized HTML** (output of `sanitize()`).
 |--------|------|
 | `sanitize(string $html): string` | Whitelist sanitizer — primary persistence/render gate |
 | `escapeHtml(string $text): string` | Escape plain text for HTML contexts |
-| `getPlainText(string $html): string` | Extract visible text for business checks |
+| `getPlainText(string $html): string` | Raw DOM `textContent` extraction for business checks |
 
 No extra normalization API in CORE_PHP: `normalizeRichTextHtml()` lives in CORE_UX for editor output cleanup only.
 
@@ -51,7 +51,9 @@ Only `color` (hex, `rgb(...)`, or named) and `text-align` (`left`, `center`, `ri
 
 ### Plain text
 
-Use `getPlainText()` to test for real content, apply **application-owned** length limits on visible text, or build plain-text previews. CORE_PHP does not enforce business max lengths (e.g. 5000 characters).
+`getPlainText()` returns raw DOM `textContent` — no trim or whitespace normalization in the CORE primitive (aligned with CORE_UX `getPlainTextFromHtml()`).
+
+Use it for maxlength checks, presence tests, or plain-text previews. Apply `trim()` (or stricter rules) in the consuming application when validating “real” non-empty content. CORE_PHP does not enforce business max lengths (e.g. 5000 characters).
 
 ## Semantic parity vs CORE_UX
 

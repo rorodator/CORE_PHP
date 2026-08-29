@@ -177,10 +177,36 @@ assertContains('Été', $output, 'accented characters preserved');
 assertContains('café', $output, 'UTF-8 preserved');
 assertContains('naïve', $output, 'UTF-8 in formatting preserved');
 
-// 20. getPlainText
+// 20. getPlainText (raw textContent — no trim in CORE primitive)
 assertSame('Hello world', RichTextHtml::getPlainText('<p>Hello <strong>world</strong></p>'), 'plain text extraction');
+assertSame('  hello  ', RichTextHtml::getPlainText('<p>  hello  </p>'), 'getPlainText preserves DOM whitespace');
 assertSame('', RichTextHtml::getPlainText('<p><br></p>'), 'empty-ish HTML yields empty plain text');
 assertSame('Visibleignored()', RichTextHtml::getPlainText('<p>Visible</p><script>ignored()</script>'), 'plain text includes unwrapped script text nodes like DOM textContent');
+
+// Nested forbidden wrappers — descendants must be sanitized before unwrap
+$output = RichTextHtml::sanitize('<section><a href="javascript:alert(1)">X</a></section>');
+assertNotContains('href=', $output, 'nested wrapper: javascript href stripped');
+assertContains('<a>X</a>', $output, 'nested wrapper: anchor text kept');
+
+$output = RichTextHtml::sanitize('<section><a href="https://example.com" onclick="evil()">X</a></section>');
+assertContains('href="https://example.com"', $output, 'nested wrapper: safe href kept');
+assertContains('rel="noopener noreferrer"', $output, 'nested wrapper: rel normalized');
+assertContains('target="_blank"', $output, 'nested wrapper: target normalized');
+assertNotContains('onclick', $output, 'nested wrapper: onclick removed');
+
+$output = RichTextHtml::sanitize('<section><img src="x" onerror="evil()"></section>');
+assertNotContains('img', $output, 'nested wrapper: img removed');
+assertNotContains('onerror', $output, 'nested wrapper: onerror removed');
+
+$output = RichTextHtml::sanitize('<section><span style="background:red;color:blue">X</span></section>');
+assertContains('color:blue', $output, 'nested wrapper: only allowed style kept');
+assertNotContains('background', $output, 'nested wrapper: background removed');
+
+$output = RichTextHtml::sanitize('<foo><bar><a href="javascript:alert(1)">X</a></bar></foo>');
+assertNotContains('href=', $output, 'double nested wrapper: javascript href stripped');
+assertNotContains('<bar', $output, 'double nested wrapper: inner forbidden tag removed');
+assertNotContains('<foo', $output, 'double nested wrapper: outer forbidden tag removed');
+assertContains('X', $output, 'double nested wrapper: text kept');
 
 // 21. idempotent sanitize
 $input = '<p>Hello <a href="https://example.com">Link</a></p><script>x</script>';

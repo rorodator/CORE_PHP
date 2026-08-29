@@ -18,14 +18,6 @@ final class RichTextHtml
         'p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'span', 'div',
     ];
 
-    /** @var array<string, list<string>> */
-    private const ALLOWED_ATTRS = [
-        'a' => ['href', 'target', 'rel'],
-        'span' => ['style'],
-        'p' => ['style'],
-        'div' => ['style'],
-    ];
-
     private const SAFE_HREF = '/^(https?:|mailto:|#|\/|\?)/i';
 
     private const ALLOWED_STYLE = '/^(?:color:\s*(#[0-9a-f]{3,8}|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)|[a-z]+)\s*;?\s*)?(?:text-align:\s*(left|center|right|justify)\s*;?\s*)?$/i';
@@ -43,7 +35,7 @@ final class RichTextHtml
     }
 
     /**
-     * Returns plain text extracted from an HTML fragment (visible text only).
+     * Returns plain text extracted from an HTML fragment (raw DOM textContent).
      */
     public static function getPlainText(string $html): string
     {
@@ -53,7 +45,7 @@ final class RichTextHtml
 
         $doc = self::loadFragmentDocument($html);
         if ($doc === null) {
-            return trim(preg_replace('/\s+/u', ' ', strip_tags($html)) ?? '');
+            return preg_replace('/<[^>]+>/', ' ', $html) ?? '';
         }
 
         $root = $doc->documentElement;
@@ -61,7 +53,7 @@ final class RichTextHtml
             return '';
         }
 
-        return trim($root->textContent ?? '');
+        return $root->textContent ?? '';
     }
 
     /**
@@ -83,10 +75,16 @@ final class RichTextHtml
             return '';
         }
 
-        self::cleanElementTree($root);
+        $cleanedRoot = $doc->createElement('div');
+        foreach (self::snapshotChildNodes($root) as $child) {
+            $cleaned = self::cleanNode($doc, $child);
+            if ($cleaned !== null) {
+                self::appendCleanedNode($cleanedRoot, $cleaned);
+            }
+        }
 
         $output = '';
-        foreach ($root->childNodes as $child) {
+        foreach ($cleanedRoot->childNodes as $child) {
             $output .= $doc->saveHTML($child);
         }
 
@@ -111,81 +109,90 @@ final class RichTextHtml
         return $doc;
     }
 
-    private static function cleanElementTree(\DOMElement $element): void
+    /**
+     * @return list<\DOMNode>
+     */
+    private static function snapshotChildNodes(\DOMNode $node): array
     {
-        $remove = [];
-        foreach ($element->childNodes as $child) {
-            if (!$child instanceof \DOMElement) {
-                continue;
-            }
-
-            $tag = strtolower($child->nodeName);
-            if (!in_array($tag, self::ALLOWED_TAGS, true)) {
-                while ($child->firstChild !== null) {
-                    $element->insertBefore($child->firstChild, $child);
-                }
-                $remove[] = $child;
-                continue;
-            }
-
-            self::cleanAttributes($child);
-            self::cleanElementTree($child);
+        $snapshot = [];
+        foreach ($node->childNodes as $child) {
+            $snapshot[] = $child;
         }
 
-        foreach ($remove as $node) {
-            if ($node->parentNode !== null) {
-                $node->parentNode->removeChild($node);
-            }
-        }
+        return $snapshot;
     }
 
-    private static function cleanAttributes(\DOMElement $element): void
+    private static function appendCleanedNode(\DOMNode $parent, \DOMNode $cleaned): void
     {
-        $tag = strtolower($element->nodeName);
-        $allowed = self::ALLOWED_ATTRS[$tag] ?? [];
+        if ($cleaned instanceof \DOMDocumentFragment) {
+            while ($cleaned->firstChild !== null) {
+                $parent->appendChild($cleaned->firstChild);
+            }
+            return;
+        }
 
-        if ($element->hasAttributes()) {
-            $toRemove = [];
-            foreach ($element->attributes as $attribute) {
-                if (!in_array(strtolower($attribute->nodeName), $allowed, true)) {
-                    $toRemove[] = $attribute->nodeName;
+        $parent->appendChild($cleaned);
+    }
+
+    private static function cleanNode(\DOMDocument $doc, \DOMNode $node): ?\DOMNode
+    {
+        if ($node instanceof \DOMText) {
+            return $node->cloneNode(false);
+        }
+
+        if (!$node instanceof \DOMElement) {
+            return null;
+        }
+
+        $tag = strtolower($node->nodeName);
+        if (!in_array($tag, self::ALLOWED_TAGS, true)) {
+            $fragment = $doc->createDocumentFragment();
+            foreach (self::snapshotChildNodes($node) as $child) {
+                $cleaned = self::cleanNode($doc, $child);
+                if ($cleaned !== null) {
+                    self::appendCleanedNode($fragment, $cleaned);
                 }
             }
-            foreach ($toRemove as $name) {
-                $element->removeAttribute($name);
+
+            return $fragment;
+        }
+
+        $out = $doc->createElement($tag);
+        self::copyAllowedAttributes($node, $out);
+
+        foreach (self::snapshotChildNodes($node) as $child) {
+            $cleaned = self::cleanNode($doc, $child);
+            if ($cleaned !== null) {
+                self::appendCleanedNode($out, $cleaned);
             }
         }
+
+        return $out;
+    }
+
+    private static function copyAllowedAttributes(\DOMElement $source, \DOMElement $target): void
+    {
+        $tag = strtolower($source->nodeName);
 
         if ($tag === 'a') {
-            self::applyAnchorAttributes($element);
-            return;
-        }
-
-        if (in_array($tag, ['span', 'p', 'div'], true) && $element->hasAttribute('style')) {
-            $safeStyle = self::sanitizeStyle((string)$element->getAttribute('style'));
-            if ($safeStyle === null) {
-                $element->removeAttribute('style');
-            } else {
-                $element->setAttribute('style', $safeStyle);
+            $safeHref = self::sanitizeHref($source->hasAttribute('href') ? (string)$source->getAttribute('href') : null);
+            if ($safeHref === null) {
+                return;
             }
-        }
-    }
 
-    private static function applyAnchorAttributes(\DOMElement $element): void
-    {
-        $safeHref = self::sanitizeHref($element->hasAttribute('href') ? (string)$element->getAttribute('href') : null);
-        $element->removeAttribute('href');
-        $element->removeAttribute('target');
-        $element->removeAttribute('rel');
-
-        if ($safeHref === null) {
+            $target->setAttribute('href', $safeHref);
+            $target->setAttribute('rel', 'noopener noreferrer');
+            if (preg_match('/^https?:/i', $safeHref) === 1) {
+                $target->setAttribute('target', '_blank');
+            }
             return;
         }
 
-        $element->setAttribute('href', $safeHref);
-        $element->setAttribute('rel', 'noopener noreferrer');
-        if (preg_match('/^https?:/i', $safeHref) === 1) {
-            $element->setAttribute('target', '_blank');
+        if (in_array($tag, ['span', 'p', 'div'], true) && $source->hasAttribute('style')) {
+            $safeStyle = self::sanitizeStyle((string)$source->getAttribute('style'));
+            if ($safeStyle !== null) {
+                $target->setAttribute('style', $safeStyle);
+            }
         }
     }
 

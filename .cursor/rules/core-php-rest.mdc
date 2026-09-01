@@ -19,6 +19,16 @@ Every app endpoint extends `\Core\Base\RestService`. See `ai-instructions/rest-s
 - **Responses:** functional `status` in JSON body (`SUCCESS`, …) — no exceptions for normal flows; HTTP 200 on success paths.
 - **IDs:** internal SQL IDs in PHP/IO; external UID only at API boundaries.
 
+## JSON body cache semantics
+
+`RestService::getJsonBody()` intentionally uses a function-local `static` cache so multiple `source => 'json'` parameters in the **same request** decode `php://input` only once.
+
+For normal PHP web execution — including `php -S`, PHP-FPM and Apache/mod_php — request state is reset between HTTP requests. The function-local static therefore does **not** leak one request body into a later HTTP request.
+
+Do **not** add an app-level `getJsonBody()` override, JSON→`$_POST` hydration, `RAW_JSON_BODY`, or another compatibility cache merely because the CORE implementation uses `static`.
+
+If a suspected cross-request JSON leak appears, first reproduce it through separate real HTTP requests and capture the exact decoded/request values. Only treat the cache as a problem if the application is deliberately running multiple logical requests inside one long-lived PHP process without normal request teardown/reset (for example a custom worker/test harness). That non-standard runtime must own the reset/isolation behavior; do not change ordinary web RestService semantics to accommodate it.
+
 ## Authorization — mandatory on every endpoint
 
 **No endpoint may assume the caller is allowed.** Declarations (`$securityLevel`, `$security`) are necessary but not sufficient — enforce rights in hooks and/or `process()` before returning or mutating data.

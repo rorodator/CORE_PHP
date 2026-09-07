@@ -190,6 +190,28 @@ try {
         Support\rest_invoke_scenario('rate-limit-false-with-limiter'),
         'SUCCESS'
     );
+    $signal = sys_get_temp_dir() . DIRECTORY_SEPARATOR . \Core\Tests\Fixtures\RecordingRateLimiter::SIGNAL_FILE;
+    @unlink($signal);
+    rest_assert_success_envelope(
+        Support\rest_invoke_scenario('rate-limit-recorded'),
+        'SUCCESS'
+    );
+    assertSame(
+        'auth',
+        is_file($signal) ? (string)file_get_contents($signal) : '',
+        'Valid limiter must be invoked with the declared bucket'
+    );
+    @unlink($signal);
+    rest_assert_security_error(
+        Support\rest_invoke_scenario('rate-limit-missing-class'),
+        500,
+        'SECURITY_DECLARATION_ERROR'
+    );
+    rest_assert_security_error(
+        Support\rest_invoke_scenario('rate-limit-no-enforce'),
+        500,
+        'SECURITY_DECLARATION_ERROR'
+    );
 
     // 6. Validation
     rest_assert_validation_error(

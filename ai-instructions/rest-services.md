@@ -83,7 +83,9 @@ When a consuming application registers `[services] rateLimiter`, CORE calls
 `$limiter->enforce($bucket)` after the declaration is valid. The limiter must
 throw `CoreSecurityException(429, 'RATE_LIMITED')` when the caller exceeds the
 budget. Without that service (or when `rateLimit` is `false`), the hook stays a
-no-op.
+no-op. A configured limiter that cannot be instantiated, or that lacks
+`enforce()`, is a `SECURITY_DECLARATION_ERROR` — CORE does not silently disable
+enforcement.
 
 Applications may still override `enforceRateLimit()` instead. Declaring a bucket
 without a registered limiter or override does **not** throttle traffic.

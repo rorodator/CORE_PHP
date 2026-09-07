@@ -481,11 +481,11 @@ abstract class RestService
     }
 
     /**
-     * Call `core()->rateLimiter->enforce($bucket)` when that service exists.
+     * Call `core()->rateLimiter->enforce($bucket)` when that service is configured.
      *
-     * The limiter must expose `enforce(string $bucket): void` and throw
-     * CoreSecurityException(429, 'RATE_LIMITED') when the caller is over budget.
-     * Absence of a registered limiter keeps the historical no-op behaviour.
+     * Unconfigured limiter (`core()->rateLimiter === null`) keeps the historical
+     * no-op. A configured limiter that cannot be instantiated, or that does not
+     * expose `enforce()`, is a visible configuration error — not a silent disable.
      *
      * @throws CoreSecurityException
      */
@@ -494,14 +494,30 @@ abstract class RestService
         if (!function_exists('core')) {
             return;
         }
+
         try {
             $limiter = core()->rateLimiter;
         } catch (\Throwable $e) {
+            throw new CoreSecurityException(
+                'Configured rateLimiter could not be resolved: ' . $e->getMessage(),
+                500,
+                self::STATUS_DECLARATION_ERROR,
+                $e
+            );
+        }
+
+        if ($limiter === null) {
             return;
         }
+
         if (!is_object($limiter) || !method_exists($limiter, 'enforce')) {
-            return;
+            throw new CoreSecurityException(
+                'Configured rateLimiter must expose enforce(string $bucket): void.',
+                500,
+                self::STATUS_DECLARATION_ERROR
+            );
         }
+
         $limiter->enforce($bucket);
     }
 

@@ -24,10 +24,12 @@ use Core\Tests\Fixtures\MissingSecurityMetadataStub;
 use Core\Tests\Fixtures\NonSuccessStatusStub;
 use Core\Tests\Fixtures\OwnerDefaultDenyStub;
 use Core\Tests\Fixtures\OwnerGrantedStub;
+use Core\Tests\Fixtures\InertRateLimiter;
 use Core\Tests\Fixtures\RateLimitBucketStub;
 use Core\Tests\Fixtures\RateLimitDisabledStub;
 use Core\Tests\Fixtures\RateLimitInvalidStub;
 use Core\Tests\Fixtures\RateLimitNullStub;
+use Core\Tests\Fixtures\RecordingRateLimiter;
 use Core\Tests\Fixtures\RejectingRateLimiter;
 use Core\Tests\Fixtures\SuccessEnvelopeStub;
 use Core\Tests\Fixtures\UndefinedSecurityStub;
@@ -49,11 +51,18 @@ require_once dirname(__DIR__) . '/fixtures/RestStubServices.php';
 function rest_run_scenario(string $scenario): array
 {
     rest_reset_request_state();
+    $limiterByScenario = [
+        'rate-limit-enforced'           => RejectingRateLimiter::class,
+        'rate-limit-false-with-limiter' => RejectingRateLimiter::class,
+        'rate-limit-recorded'           => RecordingRateLimiter::class,
+        'rate-limit-missing-class'      => 'Core\\Tests\\Fixtures\\MissingRateLimiterClass',
+        'rate-limit-no-enforce'         => InertRateLimiter::class,
+    ];
     $bootConfig = [];
-    if (in_array($scenario, ['rate-limit-enforced', 'rate-limit-false-with-limiter'], true)) {
+    if (isset($limiterByScenario[$scenario])) {
         $bootConfig = [
             'services' => [
-                'rateLimiter' => RejectingRateLimiter::class,
+                'rateLimiter' => $limiterByScenario[$scenario],
             ],
         ];
     }
@@ -193,6 +202,9 @@ function rest_create_service(string $scenario): RestService
         'rate-limit-invalid'              => RateLimitInvalidStub::class,
         'rate-limit-enforced'             => RateLimitBucketStub::class,
         'rate-limit-false-with-limiter'   => RateLimitDisabledStub::class,
+        'rate-limit-recorded'             => RateLimitBucketStub::class,
+        'rate-limit-missing-class'        => RateLimitBucketStub::class,
+        'rate-limit-no-enforce'           => RateLimitBucketStub::class,
         'validation-required'               => ValidationRequiredStub::class,
         'validation-strict-int'             => ValidationStrictIntStub::class,
         'validation-json-source'            => ValidationJsonSourceStub::class,

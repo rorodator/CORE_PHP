@@ -250,6 +250,26 @@ class RejectingRateLimiter
     }
 }
 
+/**
+ * Test double that allows the request after recording the bucket.
+ */
+class RecordingRateLimiter
+{
+    public const SIGNAL_FILE = 'core-php-rate-limiter-called';
+
+    public function enforce(string $bucket): void
+    {
+        file_put_contents(sys_get_temp_dir() . DIRECTORY_SEPARATOR . self::SIGNAL_FILE, $bucket);
+    }
+}
+
+/**
+ * Instantiable service that is not a rate limiter.
+ */
+class InertRateLimiter
+{
+}
+
 class ValidationRequiredStub extends RestStubBase
 {
     /** @var array<int, array<string, mixed>> */

@@ -235,6 +235,21 @@ class RateLimitInvalidStub extends RestStubBase
     ];
 }
 
+/**
+ * Test double registered as core()->rateLimiter — always over budget.
+ */
+class RejectingRateLimiter
+{
+    public function enforce(string $bucket): void
+    {
+        throw new \Core\Exception\CoreSecurityException(
+            'Test limiter rejected bucket ' . $bucket . '.',
+            429,
+            'RATE_LIMITED'
+        );
+    }
+}
+
 class ValidationRequiredStub extends RestStubBase
 {
     /** @var array<int, array<string, mixed>> */

@@ -28,6 +28,7 @@ use Core\Tests\Fixtures\RateLimitBucketStub;
 use Core\Tests\Fixtures\RateLimitDisabledStub;
 use Core\Tests\Fixtures\RateLimitInvalidStub;
 use Core\Tests\Fixtures\RateLimitNullStub;
+use Core\Tests\Fixtures\RejectingRateLimiter;
 use Core\Tests\Fixtures\SuccessEnvelopeStub;
 use Core\Tests\Fixtures\UndefinedSecurityStub;
 use Core\Tests\Fixtures\UnauthenticatedStub;
@@ -48,7 +49,15 @@ require_once dirname(__DIR__) . '/fixtures/RestStubServices.php';
 function rest_run_scenario(string $scenario): array
 {
     rest_reset_request_state();
-    core_test_boot();
+    $bootConfig = [];
+    if (in_array($scenario, ['rate-limit-enforced', 'rate-limit-false-with-limiter'], true)) {
+        $bootConfig = [
+            'services' => [
+                'rateLimiter' => RejectingRateLimiter::class,
+            ],
+        ];
+    }
+    core_test_boot($bootConfig);
 
     $service = rest_create_service($scenario);
     rest_apply_scenario_request($scenario);
@@ -182,6 +191,8 @@ function rest_create_service(string $scenario): RestService
         'rate-limit-null'                 => RateLimitNullStub::class,
         'rate-limit-bucket'               => RateLimitBucketStub::class,
         'rate-limit-invalid'              => RateLimitInvalidStub::class,
+        'rate-limit-enforced'             => RateLimitBucketStub::class,
+        'rate-limit-false-with-limiter'   => RateLimitDisabledStub::class,
         'validation-required'               => ValidationRequiredStub::class,
         'validation-strict-int'             => ValidationStrictIntStub::class,
         'validation-json-source'            => ValidationJsonSourceStub::class,

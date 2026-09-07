@@ -54,7 +54,7 @@ Declarations → HTTP method → rate-limit hook → CSRF hook (when session tok
 
 **CSRF:** `policy.csrf=true` compares `X-CSRF-Token` to session `csrf_token` on mutating methods only when a session token is provisioned — token lifecycle is app-owned; no session token means no effective CSRF gate.
 
-**Rate limit:** `policy.rateLimit` is validated and audit-visible; CORE provides no counter store — apps override `enforceRateLimit()` for real throttling.
+**Rate limit:** `policy.rateLimit` is validated and audit-visible. CORE ships no counter store; when `[services] rateLimiter` is registered, `enforceRateLimit()` calls `$limiter->enforce($bucket)`. Apps may still override the hook.
 
 **Security metadata:** `resource`, `operation`, `visibilityAware` are declarations/audit — not domain policy enforcement by CORE.
 

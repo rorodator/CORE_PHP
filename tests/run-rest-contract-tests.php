@@ -163,7 +163,7 @@ try {
         'SUCCESS'
     );
 
-    // 5. Rate-limit declaration hook (no counter store in CORE)
+    // 5. Rate-limit declaration hook + optional registered limiter
     rest_assert_success_envelope(
         Support\rest_invoke_scenario('rate-limit-false'),
         'SUCCESS'
@@ -180,6 +180,15 @@ try {
         Support\rest_invoke_scenario('rate-limit-invalid'),
         500,
         'SECURITY_DECLARATION_ERROR'
+    );
+    rest_assert_security_error(
+        Support\rest_invoke_scenario('rate-limit-enforced'),
+        429,
+        'RATE_LIMITED'
+    );
+    rest_assert_success_envelope(
+        Support\rest_invoke_scenario('rate-limit-false-with-limiter'),
+        'SUCCESS'
     );
 
     // 6. Validation

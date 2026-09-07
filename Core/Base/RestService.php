@@ -23,7 +23,7 @@ use Core\Exception\CoreSecurityException;
  * Lifecycle (`handle()`):
  *  1. Declarations are present and coherent (else 500).
  *  2. The request HTTP method matches the declared one (else 405).
- *  3. Rate-limit policy hook (429 only when a subclass enforces a bucket budget).
+     *  3. Rate-limit policy hook (429 when a registered limiter or subclass enforces a bucket budget).
  *  4. CSRF gate for state-changing methods when a session token is provisioned (else 403).
  *  5. Parameters are validated against `$paramSpecs` (else 400).
  *  6. The declared security level is enforced with `$this->params` available (else 401/403).
@@ -104,8 +104,8 @@ abstract class RestService
      * - `csrf`      (bool)        — when true, compare `X-CSRF-Token` (or `_csrf`) against
      *                              `csrf_token` in session on mutating methods. Skipped when
      *                              no session token is provisioned yet (application lifecycle).
-     * - `rateLimit` (string|false)— named bucket declaration for audit/overrides; CORE does not
-     *                              enforce counters by default. `false` disables the hook.
+     * - `rateLimit` (string|false)— named bucket. CORE validates it and calls optional
+     *                              `core()->rateLimiter`. `false` disables the hook.
      * - `audit`     (bool)        — emit a structured audit log entry per call. Default: true.
      *
      * @var array<string, mixed>
@@ -454,10 +454,10 @@ abstract class RestService
     // ---------------------------------------------------------------------
 
     /**
-     * Rate-limit policy hook. Default implementation only validates the bucket
-     * declaration; CORE_PHP does not ship a counter store or generic enforcement.
-     * Consuming applications override this hook when they need concrete throttling
-     * (e.g. Redis-backed counters).
+     * Rate-limit policy hook. CORE validates the bucket declaration and, when
+     * present, invokes an optional `core()->rateLimiter` service. CORE_PHP
+     * still ships no counter store — consuming applications register the
+     * enforcer (or override this hook) to apply concrete throttling.
      *
      * Throw a CoreSecurityException(429, 'RATE_LIMITED') when the caller
      * exceeds the bucket budget.
@@ -477,9 +477,32 @@ abstract class RestService
                 self::STATUS_DECLARATION_ERROR
             );
         }
-        // No global counter store yet — concrete enforcement is wired in
-        // a project-specific override. Keep this hook to make the policy
-        // explicit and audit-visible.
+        $this->applyRegisteredRateLimiter($bucket);
+    }
+
+    /**
+     * Call `core()->rateLimiter->enforce($bucket)` when that service exists.
+     *
+     * The limiter must expose `enforce(string $bucket): void` and throw
+     * CoreSecurityException(429, 'RATE_LIMITED') when the caller is over budget.
+     * Absence of a registered limiter keeps the historical no-op behaviour.
+     *
+     * @throws CoreSecurityException
+     */
+    protected function applyRegisteredRateLimiter(string $bucket): void
+    {
+        if (!function_exists('core')) {
+            return;
+        }
+        try {
+            $limiter = core()->rateLimiter;
+        } catch (\Throwable $e) {
+            return;
+        }
+        if (!is_object($limiter) || !method_exists($limiter, 'enforce')) {
+            return;
+        }
+        $limiter->enforce($bucket);
     }
 
     /**

@@ -53,7 +53,7 @@ Optional `protected array $policy = []`. Defaults merged from `RestService::DEFA
 | Key | Type | Default | Role |
 |-----|------|---------|------|
 | `csrf`      | `bool`         | `true`       | CSRF gate on mutating methods when a session token exists. Skipped on GET and when no session token is provisioned. |
-| `rateLimit` | `string\|false`| `'standard'` | Named bucket declaration for audit/overrides; CORE does not enforce counters by default. `false` disables the hook. |
+| `rateLimit` | `string\|false`| `'standard'` | Named bucket. CORE validates it and calls optional `core()->rateLimiter`. `false` disables the hook. |
 | `audit`     | `bool`         | `true`       | Structured audit log per call. |
 
 Override hooks: `enforceRateLimit()`, `enforceCsrf()`, `auditCall($result)`.
@@ -73,15 +73,20 @@ absence must not be documented or assumed as effective CSRF protection.
 
 ### Rate limiting (`policy.rateLimit`)
 
-`policy.rateLimit` is today a **declaration and hook only**:
+`policy.rateLimit` is a **named bucket** plus an optional application enforcer:
 
 - CORE validates the bucket name (or `false` to disable);
-- the policy is visible for audit and subclass overrides;
-- **CORE_PHP ships no counter store and no generic enforcement.**
+- the policy remains visible for audit and subclass overrides;
+- **CORE_PHP ships no counter store.**
 
-A consuming application must override `enforceRateLimit()` (or equivalent middleware)
-to apply concrete throttling. Declaring `'auth'` on a login endpoint does **not** mean
-CORE protects it — enforcement must be wired explicitly.
+When a consuming application registers `[services] rateLimiter`, CORE calls
+`$limiter->enforce($bucket)` after the declaration is valid. The limiter must
+throw `CoreSecurityException(429, 'RATE_LIMITED')` when the caller exceeds the
+budget. Without that service (or when `rateLimit` is `false`), the hook stays a
+no-op.
+
+Applications may still override `enforceRateLimit()` instead. Declaring a bucket
+without a registered limiter or override does **not** throttle traffic.
 
 ### Security metadata (`$security`)
 
@@ -204,6 +209,7 @@ Each **consuming app**:
 
 - registers routes in its own Router (paths like `api/entity/action`);
 - implements domain RestService classes under its app tree (e.g. `PHP/App/Rest/`);
-- owns IO classes and migrations.
+- owns IO classes and migrations;
+- registers `[services] rateLimiter` when declared `policy.rateLimit` buckets must be enforced.
 
 This repo defines the **framework contract** only — not app routes or domain SQL.
